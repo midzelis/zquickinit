@@ -1,0 +1,18 @@
+#!/bin/bash
+
+build() {
+    add_binary basename
+    add_binary dirname
+    add_binary seq
+    add_binary df
+    add_binary pax
+    add_binary find
+    add_binary zstd
+    add_binary cpio
+    add_binary gum
+
+	# shellcheck disable=SC2154
+    add_file "$recipes_root/recipes/ez_injectkey/boot-sel.sh" "/libexec/hooks/boot-sel.d/injectkey.sh" 755
+    # shellcheck disable=SC2154
+    add_file "$recipes_root/recipes/ez_injectkey/load-key.sh" "/libexec/hooks/load-key.d/loadkey.sh" 755
+}

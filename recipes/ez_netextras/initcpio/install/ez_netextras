@@ -1,0 +1,9 @@
+#!/bin/bash
+
+build() {
+	add_binary ssh
+	add_binary curl
+	add_binary wget
+	add_binary nc
+	
+}

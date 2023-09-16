@@ -1,0 +1,8 @@
+xbps-packages:
+ - gptfdisk
+ - parted
+ - util-linux
+ - efibootmgr
+ - dosfstools
+ - mtools
+ - kpartx

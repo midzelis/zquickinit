@@ -1,0 +1,64 @@
+#!/bin/bash
+
+log() {
+  echo "ez_net: $1" > /dev/kmsg
+}
+
+mkdir -p /var/lib/dhcp
+mkdir -p /etc/dhcp
+touch /etc/fstab
+touch /etc/resolv.conf
+
+cat > /etc/dhcp/dhclient.conf <<-EOF 
+	timeout 30;
+	option classless-static-routes code 121 = array of unsigned integer 8;
+	send dhcp-client-identifier = hardware;
+	request subnet-mask, broadcast-address, time-offset, routers,
+			domain-name, domain-name-servers, domain-search, host-name,
+			root-path, interface-mtu, classless-static-routes,
+			netbios-name-servers, netbios-scope, ntp-servers,
+			dhcp6.domain-search, dhcp6.fqdn,
+			dhcp6.name-servers, dhcp6.sntp-servers;
+	EOF
+
+# Get a list of all network interfaces
+interfaces=$(ip link show | awk -F': ' '{print $2}')
+
+# Bring up each interface and get a DHCP IP address
+for interface in $interfaces; do
+	[[ $interface == 'lo' ]] && continue
+	log "[$interface] Bringing up..."
+	if ip link set "$interface" up > /dev/kmsg; then 
+		log "[$interface] Link OK"
+	else    
+		log "[$interface] Link FAILED"
+	fi
+	log "Getting IP address using DHCP"
+	if  dhclient -1 "$interface" -lf /var/lib/dhcp/dhclient.leases -v > /dev/kmsg 2>&1; then
+		log "[$interface] DHCP OK"
+	else 
+		log "[$interface] DHCP FAILED"
+	fi
+done
+
+# shellcheck disable=SC1091
+[ -r /etc/tailscale/tailscaled.conf ] && . /etc/tailscale/tailscaled.conf
+
+mkdir -p /var/log/tailscale
+modprobe tun
+tailscaled --statedir=/var/lib/tailscale > /var/log/tailscale/tailscale.log 2>&1 &
+
+# create pts if not available
+if [ ! -d /dev/pts ]; then
+	mkdir -p /dev/pts
+	mount -t devpts devpts /dev/pts
+fi
+# change root to bash
+chsh -s /bin/bash >/dev/null
+
+# shellcheck disable=SC2086,2154
+if tailscale up --reset --ssh --timeout="${tailscale_timeout:-20s}" $tailscale_args ; then
+	  log "[$interface] Tailscale OK"
+else
+	  log "[$interface] Tailscale FAILED"
+fi

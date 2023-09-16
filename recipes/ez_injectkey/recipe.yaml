@@ -1,0 +1,5 @@
+xbps-packages:
+ - gum
+ - pax
+ - zstd
+ 

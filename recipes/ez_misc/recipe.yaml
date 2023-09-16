@@ -1,0 +1,6 @@
+xbps-packages:
+ - ncurses
+ - strace
+ - vim
+ - nano
+ - file

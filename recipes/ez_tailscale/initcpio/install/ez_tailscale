@@ -1,0 +1,45 @@
+#!/bin/bash
+
+build() {
+	
+	# shellcheck disable=SC2154
+	for state in  "/var/lib/tailscale/tailscaled.state" "$recipes_root/tailscaled.state" "$recipes_root/build/tailscaled.state"; do
+		[[ -f "$state" ]] && break
+	done
+
+	if [ ! -r "$state" ]; then
+		warning "Tailscale node data (tailscaled.state) not found, not installing lazy_tailscale."
+		return 0
+	fi
+	echo "Using ${state}"
+
+	add_binary bash
+	add_binary "$recipes_root/recipes/ez_tailscale/ez_ifup" /usr/bin/ez_ifup 755
+	add_binary gum
+	add_binary ip
+	add_binary getent
+	add_binary dhclient
+	add_binary dhclient-script
+	add_file /etc/resolv.conf
+	# prefer real chown over busybox
+	add_binary chown
+
+	#tailscale ssh needs to be able to lookup users
+	add_file /etc/passwd
+	add_file /etc/group
+	add_file /etc/shells
+	add_binary chsh
+
+	add_binary tailscaled
+	add_binary tailscale
+	add_binary iptables
+	add_binary ip6tables
+	
+	add_full_dir /usr/lib/xtables
+	add_module tun
+	add_all_modules netfilter
+
+	add_file "$state" /var/lib/tailscale/tailscaled.state
+	[ -r "/etc/tailscale/tailscaled.conf" ] && add_file /etc/tailscale/tailscaled.conf 
+
+}

@@ -1,0 +1,6 @@
+#!/bin/bash
+
+echo "Closing SSH sessions"
+
+ts_ssh=$(pgrep -f ssh)
+[ -n "$ts_ssh" ] && pkill -9 -P "$ts_ssh"

@@ -1,0 +1,3 @@
+xbps-packages:
+ - tmux
+help: "Installs `tmux`. Roots ZFSBootmenu within tmux. SSH logins will automatically join existing tmux sesion. "

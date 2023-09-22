@@ -1,0 +1,32 @@
+#!/bin/bash
+set -m
+
+trap "echo 'Reboot interrupted.'; exit 1" INT SIGINT
+
+function reboot {
+    echo "Rebooting..."
+    for i in 3 2 1; do
+        echo $i
+        sleep 1
+    done
+
+    echo "Unmounting filesystems"
+    pools=$(zpool list -H -o name)
+    for pool in $pools; do
+        zfs list -H -r -o name -S name "$pool" | xargs -n 1 zfs unmount
+    done
+   
+    echo "Shutdown hooks"
+    # Stop any reboot tasksif present
+    for f in /ez_recipes/reboot.d/*; do
+        if [[ -x $f ]]; then 
+            "$f" 
+        fi
+    done
+
+    echo "Rebooting"
+    sleep 0.5s
+    echo b > /proc/sysrq-trigger
+}
+
+reboot

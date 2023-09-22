@@ -1,0 +1,6 @@
+xbps-packages:
+ - dhclient
+ - iproute2
+ - net-tools
+ - traceroute
+help: Brings up all network interfaces, starts DHCP, invokes hooks. 

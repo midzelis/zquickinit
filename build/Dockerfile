@@ -69,6 +69,11 @@ RUN --mount=type=cache,target=/var/cache/xbps <<-EOF
 	
 	EOF
 
+RUN <<-EOF
+	echo "en_US.UTF-8 UTF-8" > /etc/default/libc-locales
+	xbps-reconfigure -f glibc-locales
+	EOF
+
 # ZFSBootMenu commit hash, tag or branch name used by
 # default to build ZFSBootMenu images (default: master)
 ARG ZBM_COMMIT_HASH
@@ -97,6 +102,5 @@ COPY --chmod=755 bake.sh /
 
 # Run the build script with no arguments by default
 ENTRYPOINT [ "/bake.sh" ]
-ENV GENERATE_RAW_DISK_IMG=
 ENV RUNNING_IN_CONTAINER=1
 CMD [ "interactive" ]

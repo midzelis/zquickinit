@@ -1,6 +1,4 @@
 xbps-packages:
- - ncurses
- - strace
  - vim
  - nano
- - file
+help: "Includes: `vim` and `nano`."

@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# this is a one time task
+[[ -f /var/run/ez_ifup ]] && exit 0
+touch /var/run/ez_ifup
+
 log() {
   echo "ez_net: $1" > /dev/kmsg
 }
@@ -26,39 +30,28 @@ interfaces=$(ip link show | awk -F': ' '{print $2}')
 
 # Bring up each interface and get a DHCP IP address
 for interface in $interfaces; do
-	[[ $interface == 'lo' ]] && continue
 	log "[$interface] Bringing up..."
 	if ip link set "$interface" up > /dev/kmsg; then 
 		log "[$interface] Link OK"
 	else    
 		log "[$interface] Link FAILED"
 	fi
+	[[ $interface == 'lo' ]] && continue
 	log "Getting IP address using DHCP"
-	if  dhclient -1 "$interface" -lf /var/lib/dhcp/dhclient.leases -v > /dev/kmsg 2>&1; then
+
+    mkdir -p /var/log
+    # only keep the funnel URL up for 30 minutes
+	if  dhclient -1 "$interface" -lf /var/lib/dhcp/dhclient.leases -v > /var/log/dhclient.log 2>&1 ; then
 		log "[$interface] DHCP OK"
 	else 
 		log "[$interface] DHCP FAILED"
 	fi
 done
 
-# shellcheck disable=SC1091
-[ -r /etc/tailscale/tailscaled.conf ] && . /etc/tailscale/tailscaled.conf
+# Start any lazy net hooks, if present
+for f in /ez_recipes/ez_ifup.d/*; do
+	if [[ -x $f ]]; then 
+		"$f" 
+	fi
+done
 
-mkdir -p /var/log/tailscale
-modprobe tun
-tailscaled --statedir=/var/lib/tailscale > /var/log/tailscale/tailscale.log 2>&1 &
-
-# create pts if not available
-if [ ! -d /dev/pts ]; then
-	mkdir -p /dev/pts
-	mount -t devpts devpts /dev/pts
-fi
-# change root to bash
-chsh -s /bin/bash >/dev/null
-
-# shellcheck disable=SC2086,2154
-if tailscale up --reset --ssh --timeout="${tailscale_timeout:-20s}" $tailscale_args ; then
-	  log "[$interface] Tailscale OK"
-else
-	  log "[$interface] Tailscale FAILED"
-fi

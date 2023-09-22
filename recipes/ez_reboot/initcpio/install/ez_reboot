@@ -1,0 +1,5 @@
+#!/bin/bash
+
+build() {
+	add_file "$recipes_root/recipes/ez_reboot/reboot" /usr/sbin/reboot 755
+}

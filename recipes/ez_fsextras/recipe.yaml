@@ -6,3 +6,4 @@ xbps-packages:
  - dosfstools
  - mtools
  - kpartx
+help: "Includes useful commands for creating and viewing partitions and filesystems. Also `efibootmgr`, `cryptsetup`.  "

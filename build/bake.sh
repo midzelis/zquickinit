@@ -10,14 +10,10 @@ done
 DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
 
 ZBM_ROOT=/LUNA/ALPHA/PERSONAL/git/zfsbootmenu
-
 SRC_ROOT=${SRC_ROOT:-"$(dirname "$DIR")"}
 RECIPES_ROOT=${RECIPES_ROOT:-${SRC_ROOT}/recipes}
-
 RECIPE_BUILDER="midzelis/ez-zfsbootmenu-builder"
-TAILSCALE_STATE=${TAILSCALE_STATE:-"$SRC_ROOT/tailscaled.state"}
 DOCKER=docker # or podman or buildah bud
-
 
 # This will build the main docker image
 # shellcheck disable=SC2317
@@ -85,25 +81,35 @@ _internal_run() {
 
 	if [[ -n "$interactive" ]]; then 
 
+		if which yq-go >/dev/null; then
+			yg=yq-go
+		elif which yq >/dev/null; then
+			yg=yq
+		else
+			echo "yq (or yq-go) is required"
+			exit 1
+		fi
+
+		help=
+		for recipe in /input/recipes/*/recipe.yaml; do
+			[[ ! -r $recipe ]] && continue
+			name=$(basename "$(dirname "$recipe")")
+			help+=" - \`$name\` - $(yq-go e '.help ' "$recipe")\n"
+		done
+
 		IFS=$'\n' sorted=($(sort <<<"${recipes[*]}"))
 		unset IFS
 		help_text=$(cat <<-EOF
 			**Welcome to EZ ZFSBootMenu (interactive mode)**
 			# Which recipes do you want to include in this build?
-			- \`ez_tailscale\` - This will include binary \`ez_ifup\` which will bring up **Tailscale** when invoked. Recommended to be used with \`ez_injectkey\`. 
-			- \`ez_injectkey\` - A **secure** way to unlock root ZFS dataset and inject the key into the selected initrd image. 
-			  1. When you encounter an encrypted filesystem it will prompt to unlock and save the key in memory. 
-			  2. Then it will opy the initrd image to memory and then create the key at \`keylocation\` within the image. 
-			- \`ez_fsextras\` - Includes useful commands like: \`(df, du, which, gdisk, parted, wipefs, kpartx, sgdisk, mkfs.ext4, mkfs.vfat, efibootmgr, cyryptsetup)\`. 
-			- \`ez_misc\` - Includes utiltities \`clear, reset\` and \`strace\` for debugging and \`vi\` editor.
-			- \`ez_netextras\` - Includes: \`ssh\` (OpenSSH), \`curl\`, \`wget\`, \`nc\`.  
+			$(printf "%b" "$help")
 			<br>
 			EOF
 			)
-
+		# echo -n "${help_text}"
 		gum format "${help_text}" " "
 		selected=$(IFS=, ; echo "${sorted[*]}")
-		recipes=($(gum choose ${sorted[*]} --no-limit --selected="$selected"))
+		recipes=($(gum choose ${sorted[*]} --height=20 --no-limit --selected="$selected"))
 		
 		help_text=$(cat <<-EOF
 			# Which mkcpio system hooks would you like to include?
@@ -126,15 +132,10 @@ _internal_run() {
 			zfsbootmenu_sel=1
 		fi
 
-		if [[ ${recipes[@]} =~ ez_tailscale ]]; then
-			help_text=$(cat <<-EOF
-				# \`ez_tailscale\` requires a tailsaled.state. Enter it now, ctrl-d to finish. 
-				<br>
-				EOF
-				)
-			gum format "${help_text}" " "
-			gum write > /var/lib/tailscale/tailscaled.state
-		fi
+		for recipe in "${recipes[@]}"; do
+			[[ ! -x /input/recipes/$recipe/setup.sh ]] && continue
+			/input/recipes/"$recipe"/setup.sh
+		done
 
 	else
 		strip_sel=1
@@ -156,8 +157,9 @@ _internal_run() {
 
 	build_time=$(date -u +"%Y-%m-%d_%H%M%S");
 
-	mkdir -p /input/initcpio
-	cat > /input/initcpio/mkinitcpio.conf <<-EOF
+	mkdir -p /tmp
+	rm -rf /tmp/*
+	cat > /tmp/mkinitcpio.conf <<-EOF
 		MODULES=()
 		BINARIES=()
 		FILES=()
@@ -173,11 +175,9 @@ _internal_run() {
 		zfsbootmenu_teardown=()
 		EOF
 
-	# cat /input/initcpio/mkinitcpio.conf
+	echo "zfsbootmenu ro loglevel=4 zbm.autosize=0" > /tmp/cmdline
 
-	echo "zfsbootmenu ro loglevel=4" > /input/initcpio/cmdline
-
-	cat > /input/initcpio/os-release <<-EOF
+	cat > /tmp/os-release <<-EOF
 		NAME="ZFSBootMenu; Void Linux"
 		ID="zfsbootmenu"
 		ID_LIKE="void"
@@ -192,48 +192,34 @@ _internal_run() {
 	hookdirs+=("${hook_dirs[@]/#/--hookdir }")
 
 	output_img=/output/ez-zfsbootmenu-$build_time.img
-	output_uki="/output/ez-zbmbootmenu-$build_time.efi" 
-	mkinitcpio --config /input/initcpio/mkinitcpio.conf ${hookdirs[*]} \
+	output_uki="/output/ez-zbm-$build_time.efi" 
+	mkinitcpio --config /tmp/mkinitcpio.conf ${hookdirs[*]} \
 		--kernel 6.1.51_1 \
-		--osrelease /input/initcpio/os-release \
-		--cmdline /input/initcpio/cmdline \
+		--osrelease /tmp/os-release \
+		--cmdline /tmp/cmdline \
 		--generate "$output_img" \
-		-U "$output_uki" \
-	
+		-U "$output_uki" 
+	cp /boot/vmlinuz-6.1.51_1 /output/vmlinuz-6.1.51_1
 	ls -1 /output/*.img | sort -r | tail -n +4 | xargs -r rm
 	ls -1 /output/*.efi | sort -r | tail -n +4 | xargs -r rm
-
-	# ignore me, debug
-	if [[ -n $GENERATE_RAW_DISK_IMG ]]; then
-		set -x
-		out="/output/boot-vfs.raw"
-		echo "Generating raw file image for VM to $out"
-		rm -f out
-		dd if=/dev/zero of="$out" bs=1M count=256
-		mformat -i "$out" ::
-		mmd -i "$out" ::/EFI
-		mmd -i "$out" ::/EFI/BOOT
-		mcopy -i "$out" "$output_uki" ::/EFI/BOOT/BOOTX64.EFI
-	fi
-
 }
 
 # shellcheck disable=SC2317
 ez_zbm() {
 	cmd=("$DOCKER" run --rm -it 
+		-e GENERATE_RAW_DISK_IMG="$GENERATE_RAW_DISK_IMG"
 		-v "$SRC_ROOT/build/bake.sh:/bake.sh" 
 		-v "$SRC_ROOT:/input" 
 		-v "$ZBM_ROOT:/zbm" 
 		-v "$SRC_ROOT/output:/output" 
 		${1:-}
-		"$RECIPE_BUILDER")
+		"$RECIPE_BUILDER" ${2:-})
 
 	"${cmd[@]}"
-	mv -v "$SRC_ROOT/output/boot-vfs.raw" /LUNA/ALPHA/PVE_VIRTUAL_MACHINES/NFS_DISKS/images/2200/vm-2200-disk-0.raw
 }
 # shellcheck disable=SC2317
 ez_zbm_debug() {
-	ez_zbm --entrypoint=/bin/bash
+	ez_zbm --entrypoint=/bin/bash -i
 }
 
 cmds=(ez_zbm ez_zbm_debug init create_tailscale_node)

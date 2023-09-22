@@ -1,0 +1,3 @@
+xbps-packages:
+ - ttyd
+help: "Generates a random URL, starts a web-based terminal (ttyd) on tailscale funnel and sends push notification for easy remote login."

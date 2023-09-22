@@ -1,2 +1,6 @@
 output
-tailscaled.state
+*.qcow2
+hostname
+ez_webttyd_pushover.conf
+tailscaled.state*
+*.test.*

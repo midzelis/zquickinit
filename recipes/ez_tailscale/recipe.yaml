@@ -1,5 +1,3 @@
 xbps-packages:
  - tailscale
- - gum
- - bash
-
+help: Tailscale support, including SSH and Funnel. 

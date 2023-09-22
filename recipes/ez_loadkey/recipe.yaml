@@ -1,0 +1,5 @@
+xbps-packages:
+ - gum
+ - pax
+ - zstd
+help: "Prompts to unlock encrypted ZFS dataset. Then injects the passphrase into the boot environment to prevent prompting twice. " 

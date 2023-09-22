@@ -1,0 +1,17 @@
+#!/bin/bash
+
+build() {
+    add_binary basename
+    add_binary dirname
+    add_binary seq
+    add_binary df
+    add_binary pax
+    add_binary find
+    add_binary zstd
+    add_binary cpio
+    add_binary gum
+
+    echo "Note: patching /lib/zfsbootmenu-core.sh for loadkey and boot functions"
+    # shellcheck disable=SC2154
+    cat "$recipes_root/recipes/ez_loadkey/core_patch" >> "${BUILDROOT}/lib/zfsbootmenu-core.sh"
+}

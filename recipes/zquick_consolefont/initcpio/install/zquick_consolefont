@@ -1,0 +1,10 @@
+#!/bin/bash
+
+build() {
+	add_binary setfont
+	add_binary showconsolefont
+    #TODO include just the font we want
+	add_full_dir /usr/share/kbd/consolefonts
+
+	zquick_add_fs
+}

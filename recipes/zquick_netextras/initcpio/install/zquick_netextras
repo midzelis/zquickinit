@@ -1,0 +1,25 @@
+#!/bin/bash
+
+
+
+build() {
+	add_binary ssh
+	add_binary sshd
+	add_binary curl
+	add_binary wget
+	add_binary nc
+	add_binary w
+	add_binary nmap
+	add_binary ncat
+	add_file /etc/services
+
+	add_binary ssh-keygen
+	
+	mkdir -p "${BUILDROOT}/etc/ssh"
+	cat <<-EOF > "${BUILDROOT}/etc/ssh/sshd_config"
+		Port 22
+		PermitRootLogin yes
+		IgnoreUserKnownHosts yes
+	EOF
+
+}

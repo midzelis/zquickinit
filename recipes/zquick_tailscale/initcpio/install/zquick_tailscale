@@ -1,0 +1,32 @@
+#!/bin/bash
+
+
+
+build() {
+
+	zquick_add_secret /var/lib/tailscale/tailscaled.state "tailscale node identity"
+	zquick_add_secret /etc/tailscale/tailscaled.conf "tailscale config"
+
+	zquick_add_fs
+	
+	#tailscale ssh needs to be able to lookup users
+	add_binary getent
+
+	add_binary tailscaled
+	add_binary tailscale
+	add_binary iptables
+	add_binary ip6tables
+	
+	add_full_dir /usr/share/ca-certificates
+	add_dir /etc/ssl/certs
+	add_file /etc/ca-certificates.conf
+	add_binary openssl
+	add_binary update-ca-certificates
+	chroot "${BUILDROOT}" /bin/bash -c "update-ca-certificates" > /dev/null
+	chroot "${BUILDROOT}" /bin/bash -c "mv /etc/ssl/certs/ca-certificates.crt /tmp; rm -rf /etc/ssl/certs/* /usr/share/ca-certificates /etc/ca-certificates.conf /usr/sbin/update-ca-certificates; mkdir -p /etc/ssl/certs;  mv /tmp/ca-certificates.crt /etc/ssl/certs/" > /dev/null
+	add_symlink /etc/ssl/cert.pem /etc/ssl/certs/ca-certificates.crt
+
+	add_full_dir /usr/lib/xtables
+	add_module tun
+	add_all_modules netfilter
+}

@@ -1,7 +1,0 @@
-xbps-packages:
- - curl
- - wget
- - void-repo-nonfree
- - nmap
- - openbsd-netcat	
-help:  "Includes: `ssh` (OpenSSH), `curl`, `wget`, `nc`."

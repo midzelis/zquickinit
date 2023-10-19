@@ -1,0 +1,3 @@
+xbps-packages:
+ - openssh
+help:  "Includes: `sshd` (OpenSSH)"

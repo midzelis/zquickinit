@@ -1,0 +1,9 @@
+xbps-packages:
+ - git
+ - curl
+ - perl
+ - gummiboot
+ - pv
+ - pax
+ - findutils
+help: "Download and install proxmox to root partition"

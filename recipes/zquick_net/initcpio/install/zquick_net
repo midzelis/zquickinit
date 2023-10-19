@@ -1,0 +1,16 @@
+#!/bin/bash
+
+build() {
+	add_checked_modules ethernet
+	add_binary ip
+	add_binary dhclient
+	add_binary dhclient-script
+	add_binary traceroute
+	add_binary netstat
+	add_binary ss
+	add_file /etc/resolv.conf
+	# prefer real chown over busybox
+	add_binary chown
+
+	zquick_add_fs
+}

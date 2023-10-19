@@ -1,0 +1,18 @@
+#!/bin/bash
+
+build() {
+    add_binary basename
+    add_binary dirname
+    add_binary seq
+    add_binary df
+    add_binary pax
+    add_binary find
+    add_binary zstd
+    add_binary cpio
+
+    echo "Note: monkey-patching kexec_kernel and load_key in zfsbootmenu-core.sh"
+    # shellcheck disable=SC2154
+    cat "$zquickinit_root/recipes/zquick_loadkey/core_patch" >> "${BUILDROOT}/lib/zfsbootmenu-core.sh"
+
+    zquick_add_fs
+}

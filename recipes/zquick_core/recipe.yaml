@@ -1,0 +1,11 @@
+xbps-packages:
+ - ncurses
+ - strace
+ - gum
+ - yq-go
+ - htop
+ - file
+ - lvm2
+ - mkinitcpio-lvm2
+ - thin-provisioning-tools
+help: "Required common dependencies to all recipes"

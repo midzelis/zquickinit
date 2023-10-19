@@ -1,7 +1,0 @@
-xbps-packages:
- - ncurses
- - strace
- - gum
- - yq-go
- - file
-help: "Required common dependencies to all recipes"

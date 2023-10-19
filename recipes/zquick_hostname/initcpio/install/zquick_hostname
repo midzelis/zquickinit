@@ -1,0 +1,15 @@
+#!/bin/bash
+
+build() {
+	for hostname in "$zquickinit_root/hostname" "/etc/hostname"; do
+		[[ -f "$hostname" ]] && break
+	done
+
+	if [ ! -r "$hostname" ]; then
+		warning "Hostname not found"
+	else 
+		add_file "$hostname" /etc/hostname
+	fi
+
+	zquick_add_fs
+}

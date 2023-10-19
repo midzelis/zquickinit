@@ -1,0 +1,8 @@
+#!/bin/bash
+
+log() {
+  echo "zquick: $1" > /dev/kmsg
+}
+
+log "Tailscale - Closing SSH sessions"
+pkill -HUP ssh

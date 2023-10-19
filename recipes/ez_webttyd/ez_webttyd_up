@@ -1,2 +1,0 @@
-#!/bin/bash
-(exec setsid /ez_recipes/ez_webttyd/ez_webttyd_start.sh &)

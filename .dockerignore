@@ -1,3 +1,9 @@
+.git
+.github
+.gitignore
+*.dockerignore
+Dockerfile
+.env
 output
 *.qcow2
 hostname
@@ -6,6 +12,6 @@ tailscaled.state*
 *.efi
 *.iso
 cache
-*test*
+*.test*
 *ssh_host*
-.code-workspace
+*.code-workspace

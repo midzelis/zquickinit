@@ -1,0 +1,26 @@
+#!/bin/bash
+
+trap "echo 'Reboot interrupted.'; exit 1" INT SIGINT
+
+function reboot {
+    echo "Rebooting..."
+    for i in 3 2 1; do
+        echo $i
+        sleep 1
+    done
+
+    echo "Unmounting filesystems"
+    pools=$(zpool list -H -o name)
+    for pool in $pools; do
+        zpool export "$pool"
+    done
+   
+    echo "Running reboot hooks"
+    /zquick/libexec/run_hooks.sh reboot.d
+
+    echo "Rebooting"
+    sleep 0.5s
+    echo b > /proc/sysrq-trigger
+}
+
+reboot

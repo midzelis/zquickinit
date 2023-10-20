@@ -1,6 +1,6 @@
 # ZQuickInit - ZFS Quick Init, Rescue and Install initramfs customizeable image
 
-A distribution based on ZFSBootMenu to securely remote boot, rescue, and install Proxmox. This is an ***opinionated***, but secure, and easy to use [ZFSBootMenu](zfsbootmenu.org)-based distribution. (maybe the first?)
+A distribution based on ZFSBootMenu to securely remote boot, rescue, and install Proxmox. This is an ***opinionated***, but secure, and easy to use [ZFSBootMenu](https://zfsbootmenu.org)-based distribution. (maybe the first?)
 
 ### Too long, didn't read. 
 

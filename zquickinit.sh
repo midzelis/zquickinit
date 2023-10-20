@@ -123,6 +123,8 @@ check() {
 # This will build the main ZquickInit Builder OCI image
 # shellcheck disable=SC2317
 builder() {
+	echo "Creating ZQuickinit OCI build image..."
+	echo
 	check docker
 	check yq 
 	
@@ -130,9 +132,15 @@ builder() {
 	# shellcheck disable=SC2016
 	mapfile -t -O "${#packages[@]}" packages < <($YG eval-all '. as $item ireduce ({}; . *+ $item) | (... | select(type == "!!seq")) |= unique | .xbps-packages[] | .. style=""' "$RECIPES_ROOT"/*/recipe.yaml)
 
-	ZBM_COMMIT_HASH=$(curl --silent https://api.github.com/repos/zbm-dev/zfsbootmenu/git/ref/heads/master | $YG .object.sha)
+	local latest_release_tag=''
+	latest_release_tag=$(curl --silent https://api.github.com/repos/zbm-dev/zfsbootmenu/releases/latest | $YG .tag_name)
+	ZBM_COMMIT_HASH=$(curl --silent "https://api.github.com/repos/zbm-dev/zfsbootmenu/git/ref/tags/${latest_release_tag}" | $YG .object.sha)
+	echo "ZQuickInit commit hash: $(git rev-parse HEAD)"
+	echo "ZBM latest release: $latest_release_tag"
+	echo "ZBM_COMMIT_HASH: $ZBM_COMMIT_HASH"
+	echo
 	echo "Building with Packages: ${packages[*]}"
-
+	echo
 	cmd=("$ENGINE" build . 
 		-t "$RECIPE_BUILDER" 
 		--build-arg KERNELS=linux6.2

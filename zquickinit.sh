@@ -26,6 +26,8 @@ ZBM_ROOT=${SRC_ROOT}/../zfsbootmenu
 RECIPES_ROOT=${RECIPES_ROOT:-${SRC_ROOT}/recipes}
 RECIPE_BUILDER="ghcr.io/midzelis/zquickinit"
 ZQUICKEFI_URL="https://github.com/midzelis/zquickinit/releases/latest"
+# if empty, use latest release tag
+ZBM_TAG=v2.2.1
 ENGINE=
 OBJCOPY=
 FIND=
@@ -132,11 +134,12 @@ builder() {
 	# shellcheck disable=SC2016
 	mapfile -t -O "${#packages[@]}" packages < <($YG eval-all '. as $item ireduce ({}; . *+ $item) | (... | select(type == "!!seq")) |= unique | .xbps-packages[] | .. style=""' "$RECIPES_ROOT"/*/recipe.yaml)
 
-	local latest_release_tag=''
-	latest_release_tag=$(curl --silent https://api.github.com/repos/zbm-dev/zfsbootmenu/releases/latest | $YG .tag_name)
-	ZBM_COMMIT_HASH=$(curl --silent "https://api.github.com/repos/zbm-dev/zfsbootmenu/git/ref/tags/${latest_release_tag}" | $YG .object.sha)
-	echo "ZQuickInit commit hash: $(git rev-parse HEAD)"
-	echo "ZBM latest release: $latest_release_tag"
+	if [[ -z "$ZBM_TAG" ]]; then
+		ZBM_TAG=$(curl --silent https://api.github.com/repos/zbm-dev/zfsbootmenu/releases/latest | $YG .tag_name)
+	fi
+	ZBM_COMMIT_HASH=$(curl --silent "https://api.github.com/repos/zbm-dev/zfsbootmenu/git/ref/tags/${ZBM_TAG}" | $YG .object.sha)
+	echo "ZQuickInit commit: $(git rev-parse HEAD)"
+	echo "ZBM tag: $ZBM_TAG"
 	echo "ZBM_COMMIT_HASH: $ZBM_COMMIT_HASH"
 	echo
 	echo "Building with Packages: ${packages[*]}"

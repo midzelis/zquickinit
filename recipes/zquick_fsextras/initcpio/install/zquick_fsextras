@@ -15,6 +15,7 @@ build() {
 	add_binary mkfs.vfat
 	add_binary efibootmgr
 	add_binary cryptsetup
+	add_binary tune2fs
 
 	add_module ext4
 	add_module ext3

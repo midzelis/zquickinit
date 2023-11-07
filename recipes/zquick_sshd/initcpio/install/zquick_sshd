@@ -22,7 +22,7 @@ build() {
 		add_file /etc/ssh/ssh_host_ed25519_key 
 	fi
 
-	if [[ ! -e "${BUILDROOT}/etc/ssh/sshd_config" ]]; then
+	if [[ ! -e "${zquickinit_root}/sshd_config" ]]; then
 		echo "No sshd_config specified, generating sshd_config that allows root login on port 22"
 		mkdir -p "${BUILDROOT}/etc/ssh"
 		cat <<-EOF > "${BUILDROOT}/etc/ssh/sshd_config"

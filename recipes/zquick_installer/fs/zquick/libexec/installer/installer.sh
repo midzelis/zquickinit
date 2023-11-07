@@ -21,6 +21,9 @@ EXISTING=
 CHROOT_MNT=
 
 # INSTALLER_DIR=/mnt/qemu-host/recipes/zquick_installer/fs/zquick/libexec/installer zquick_installer.sh
+# zpool create -O acltype=posixacl -o compatibility=openzfs-2.0-linux TMP /dev/sdb
+
+STDOPTS=( "-o compression=zstd" "-o atime=off" "-o acltype=posixacl" "-o aclinherit=passthrough" "-o xattr=sa" "-o mountpoint=/" "-o canmount=noauto")
 
 log() {
     if [ $# -eq 0 ]; then
@@ -39,17 +42,21 @@ xlog() {
 
 xspin() {
     gum style --faint "$*" 
-    if ! gum spin --spinner=points --title='' -- bash -c "$* > /tmp/tmp 2>&1"; then
-        ret=$?
-        out="$(cat /tmp/tmp)"
-        gum style --foreground=1 "${out}"
-        exit $ret
+    ret=0
+    gum spin --spinner=points --title='' -- bash -c "$* > /tmp/tmp 2>&1" || ret=$?
+    out=''
+    [[ -e /tmp/tmp ]] && out="$(cat /tmp/tmp)"
+    if ((ret!=0)); then
+        [[ -n "$out" ]] && gum style --foreground=1 "${out}"
     else
-        out="$(cat /tmp/tmp)"
-        [[ -n "$out" ]] && gum style --faint --foreground=#ff9770 "${out}"
+        [[ -n "$out" ]] && gum style --faint --foreground=#ffe2cc "${out}"
     fi
     rm -rf /tmp/tmp
-    return 0
+    return "$ret"
+}
+
+zpool_export() {
+    xspin zpool export "$1"
 }
 
 cleanup() {
@@ -63,7 +70,7 @@ cleanup() {
 
   if [ -n "${POOLNAME}" ]; then
     echo "Exporting pool '${POOLNAME}'"
-    zpool export "${POOLNAME}"
+    zpool_export "${POOLNAME}"
     unset POOLNAME
   fi
 
@@ -105,6 +112,8 @@ mount_esp() {
 import_tmproot_pool() {
     trap cleanup EXIT INT TERM
 
+    # sometimes zfs gets confused on where to find the pools, so specify all devices to help it
+    #devs=$(lsblk -no path | awk '{print "-d " $0}')
     CHROOT_MNT="$( mktemp -d )" || exit 1
     if ! xspin zpool import -o cachefile=none -R "${CHROOT_MNT}" "${POOLNAME}"; then
         echo "ERROR: unable to import ZFS pool ${POOLNAME}"
@@ -163,15 +172,19 @@ install_esp() {
             gum style "Copying QuickInitZFS to /efi"
             gum style ""
             mount_esp "$ESP"
-            mkdir -p /mnt
-            efi=$(find /mnt -type f -name '*.efi' -printf '%f\t%p\n' | sort -k1 | cut -d$'\t' -f2 | tail -n1)
+            # start QEMU envs
+            if [[ -d /mnt/qemu-host ]]; then
+                efi=$(find /mnt/qemu-host/output -type f -name '*.efi' -printf '%f\t%p\n' | sort -k1 | cut -d$'\t' -f2 | tail -n1)
+                [[ ! -x "${INJECT_SCRIPT}" ]] && INJECT_SCRIPT=$(find /mnt/qemu-host -type f -name 'zquickinit.sh' -print -quit)
+            fi
+            # end QEMU envs
             (
                 export INSTALLER_MODE=1
                 xspin "$INJECT_SCRIPT" inject /efi/EFI/zquickinit.efi "$efi"
             )
-            echo "title    ZFSQuickInit"                > /efi/loader/entries/ZFSQuickInit.conf
-            echo "options  zfsbootmenu ro loglevel=6 zbm.autosize=0"   >> /efi/loader/entries/ZFSQuickInit.conf
-            echo "linux    /EFI/ZFSQuickInit.efi"       >> /efi/loader/entries/ZFSQuickInit.conf
+            echo "title    zquickinit"                > /efi/loader/entries/zquickinit.conf
+            echo "options  zfsbootmenu ro loglevel=6 zbm.autosize=0"   >> /efi/loader/entries/zquickinit.conf
+            echo "linux    /EFI/zquickinit.efi"       >> /efi/loader/entries/zquickinit.conf
             echo "timeout 3"                            > /efi/loader/loader.conf
             gum style ""
         fi
@@ -201,11 +214,12 @@ partition_drive() {
         tput sc
         gum style --bold "CAUTION!!! ALL DATA WILL BE ERASED"
         if confirm --default=no "Proceed with partitioning $DEV?"; then
+            log umount "$DEV"?*
             umount "$DEV"?* >/dev/null 2>&1 || true
             gum spin --spinner=points --title="Clearing partition" -- sgdisk -og "$DEV" > /dev/null
-            gum spin --spinner=points --title="Creating BIOS" -- sgdisk -n 1:2048:+1M -c 1:"BIOS Boot Partition" -t 1:ef02 "$DEV" > /dev/null
-            gum spin --spinner=points --title="Creating ESP" -- sgdisk -n 2:0:+512M -c 2:"EFI System Partition" -t 2:ef00 "$DEV" > /dev/null
-            gum spin --spinner=points --title="Creating ZFS" -- sgdisk -I -n 3:0:-1M -c 3:"ZFS Root Partition" -t 3:bf01 "$DEV" > /dev/null
+            gum spin --spinner=points --title="Creating BIOS Boot Partition" -- sgdisk -n 1:2048:+1M -c 1:"BIOS Boot Partition" -t 1:ef02 "$DEV" > /dev/null
+            gum spin --spinner=points --title="Creating EFI System Partition" -- sgdisk -n 2:0:+512M -c 2:"EFI System Partition" -t 2:ef00 "$DEV" > /dev/null
+            gum spin --spinner=points --title="Creating ZFS Partition" -- sgdisk -I -n 3:0:-1M -c 3:"ZFS Root Partition" -t 3:bf01 "$DEV" > /dev/null
             tput rc
             tput ed
             log sgdisk -og "$DEV"
@@ -214,10 +228,25 @@ partition_drive() {
             log sgdisk -I -n 3:0:-1M -c 3:"ZFS Root Partition" -t 3:bf01 "$DEV"
             gum style "Partitioning successful"
             gum style ""
+            xspin wipefs -a "$DEV"1
+            xspin wipefs -a "$DEV"2
+            xspin wipefs -a "$DEV"3
             xspin sgdisk -p "$DEV"
             xspin sgdisk -v "$DEV"
             gum style ""
+            scan_parts "$DEV"
         fi
+    fi
+}
+
+scan_parts() {
+    log kpartx -u "$1" 
+    kpartx -u "$1" || true
+    # dmsetup will try to map these drives, so remove them
+    if command -v dmsetup >/dev/null 2>&1; then
+        dev=/$(echo "$1" | cut -d/ -f3-)
+        log dmsetup remove /dev/mapper/"${dev}"*
+        dmsetup remove /dev/mapper/"${dev}"*  >/dev/null 2>&1 || true
     fi
 }
 
@@ -257,10 +286,24 @@ create_pool() {
             -O aclinherit=passthrough \
             -O xattr=sa \
             -O atime=off \
+            -o ashift=12 \
             -o autotrim=on \
             -o cachefile=none \
             -o compatibility=openzfs-2.0-linux \
             "${POOLNAME}" "${DEV}";
+        log "Trying zpool secure trim"
+        if xspin zpool trim -d -w "${POOLNAME}"; then
+            log "Secure trim success"
+        else 
+            log "Trying zpool trim (not secure)"
+            if xspin zpool trim -w "${POOLNAME}"; then
+                log "Zpool trim success"
+            else
+                log "Zpool trim did not return successfully: continuing"
+            fi
+        fi
+        log "Initializing zpool..."
+        xspin zpool initialize -w "${POOLNAME}" || true
     else
         exit 1
     fi
@@ -268,7 +311,7 @@ create_pool() {
 }
 
 select_pool() {
-    gum style --bold "Choose existing ZFS pool:"
+    gum style --bold "Choose ZFS pool:"
     local pools
     pools=$(zpool list -H -o name)
     readarray -t choices < <(printf %s "$pools")
@@ -288,7 +331,7 @@ pick_or_create_pool() {
         defaultEsp=yes
     else
         gum style "* Existing Pool"
-        select_pool
+        select_poolz
     fi
     install_esp $defaultEsp
 }
@@ -307,6 +350,7 @@ encrypt_ROOT() {
     for set in "${sets[@]}"; do
         under_root=${set#"${POOLNAME}"/ROOT/}
         size=$(zfs send -RvnP "${set}@copy" | tail -n1 | awk '{print $NF}')
+        log zfs send -R "${set}@copy" | pv -Wpbafte -s "$size" -i 1 | zfs receive -o encryption=on "${POOLNAME}/COPY/${under_root}"
         zfs send -R "${set}@copy" | pv -Wpbafte -s "$size" -i 1 | zfs receive -o encryption=on "${POOLNAME}/COPY/${under_root}"
     done
     xspin zfs destroy -R "${POOLNAME}/ROOT"
@@ -315,9 +359,15 @@ encrypt_ROOT() {
 }
 
 create_encrypted_dataset() {
+    local ret=0
     log zfs create ${2:-} -o encryption=on -o keyformat=passphrase -o keylocation=prompt "$1"
-    zfs create ${2:-} -o encryption=on -o keyformat=passphrase -o keylocation=prompt "$1"
-    # Sfter setting the passphrase, change keylocation to be a file which doesn't exist. ZFSBootMenu/ZFS will take care
+    for i in $(seq 1 3); do
+        ((i>1)) && echo "Retrying $i of 3..."
+        zfs create ${2:-} -o encryption=on -o keyformat=passphrase -o keylocation=prompt "$1" && ret=$? || ret=$? 
+        ((ret==0)) && break
+    done
+    ((ret > 0)) && exit $ret
+    # After setting the passphrase, change keylocation to be a file which doesn't exist. ZFSBootMenu/ZFS will take care
     # of loading they key using 'zfs load-key -L prompt' to ask for the key even with a missing file for keylocation. 
     # This path will be used by quick_loadkey to temporarily store the key so that it can be loaded by the chainloaded 
     # kernel (i.e. proxmox, or another OS)
@@ -401,31 +451,29 @@ create_dataset() {
     local set 
     set=$(input --value=pve1 --prompt="Enter name for boot environment, without paths > ")
 
-    local stdopts=()
-    stdopts+=( "-o compression=zstd" "-o atime=off" "-o acltype=posixacl" "-o aclinherit=passthrough" "-o xattr=sa" "-o mountpoint=/" "-o canmount=noauto")
     if encroot="$( be_has_encroot "${POOLNAME}/ROOT" )"; then
         if confirm --affirmative="Inherit" --negative="New Passphrase" "${POOLNAME}/ROOT is encrypted. Do you want to inherit encryption or set a new passphrase?"; then
-            xspin zfs create ${stdopts[@]} "${POOLNAME}/ROOT/${set}"
+            xspin zfs create ${STDOPTS[@]} "${POOLNAME}/ROOT/${set}"
         else
-            create_encrypted_dataset "${POOLNAME}/ROOT/${set}" "${stdopts[*]}"
+            create_encrypted_dataset "${POOLNAME}/ROOT/${set}" "${STDOPTS[*]}"
         fi
     else
         if confirm  --default=no "Do you want to encrypt ${POOLNAME}/ROOT/${set}"?; then
-            create_encrypted_dataset "${POOLNAME}/ROOT/${set}" "${stdopts[*]}"
+            create_encrypted_dataset "${POOLNAME}/ROOT/${set}" "${STDOPTS[*]}"
         else
-            xspin zfs create ${stdopts[@]} "${POOLNAME}/ROOT/${set}"
+            xspin zfs create ${STDOPTS[@]} "${POOLNAME}/ROOT/${set}"
         fi
     fi
     xspin zpool set bootfs="${POOLNAME}/ROOT/${set}" "${POOLNAME}"
     DATASET="${POOLNAME}/ROOT/${set}"
 
-    xspin zpool export "${POOLNAME}"
+    zpool_export "${POOLNAME}"
     import_tmproot_pool
     mount_dataset
 }
 
 import_tmproot_pool_dataset() {
-    xspin zpool export "${POOLNAME}"
+    zpool_export "${POOLNAME}"
     import_tmproot_pool
     mount_dataset
 }
@@ -542,12 +590,152 @@ install() {
     gum style ""
 }
 
+# unneeded for now, since its done as part of boot
+mountLVM() {
+    if command -v lvm >/dev/null 2>&1; then
+
+        echo "Scanning for LVM"
+        lvm vgscan -v 2>/dev/null
+        lvm vgchange -a y 2>/dev/null
+
+        lvm_volumes=$(lvm lvscan 2>/dev/null | awk '{print $2}' | tr -d "'")
+        for volume in $lvm_volumes; do
+            # Get the logical volume path
+            lv_path=$(lvm lvdisplay "${volume}" 2>/dev/null | grep "LV Path" | awk '{print $3}')
+
+            if [[ $(lsblk -no FSTYPE  "${lv_path}") = "swap" ]]; then
+                log "Skipping swap: ${lv_path}"
+                continue;
+            fi
+
+            # Get the volume path
+            volume=$(echo "${lv_path}" | awk -F'/' '{for(i=3;i<=NF;i++) printf "/%s", $i}')
+
+            # Create the mount point directory
+            mkdir -p "/mnt${volume}"
+
+            # Mount the volume
+            echo "Mounting ${lv_path} on /mnt${volume}"
+            mount "${lv_path}" "/mnt${volume}"
+        done
+    else
+        echo "Skipping LVM setup, lvm not part of this image"
+    fi
+}
+convertLVM() {
+    # first we need a temp root dataset, so pick or create one
+    gum style "To convert a boot drive from LVM to ZFS, this script will: " \
+        "1) Create new encrypted ZFS dataset on a ZFS pool (not on the boot device)" \
+        "2) Copy the LVM filesystem to this ZFS dataset" \
+        "3) Partition the boot device (GPT style with 3 partitions: BIOS, ESP, ZFS)" \
+        "4) Create a new ZFS ROOT pool on the boot device" \
+        "5) Copy ZFS dataset to boot device, keeping encryption or replace with inherited encryption." \
+        "" \
+        "CAUTION: This script will only copy the root partition. If you are using LVM-thin" \
+        "stop now and manually migrate them from the boot devices" \
+        "" \
+        "NOTE: If you are using swap on the LVM partition, this will be removed. The /etc/fstab" \
+        "file will be updated to comment out the LVM mounts including swap." \
+        ""
+    if ! confirm "Ready to start converting LVM boot to ZFS boot?"; then
+        exit 1
+    fi
+    gum style "1) First, select a temporary ZFS pool - DO NOT select one on the boot drive" 
+    select_pool
+
+    gum style "2) Create a new ecrypted dataset: In a later step, you can keep this" \
+        "encryption key or replace it with one inherited from the parent" \
+        "ROOT dataset." \
+        ""
+    set=$(input --value=pve-1 --prompt="Enter name for dataset (on ${POOLNAME}) > ")
+    create_encrypted_dataset "${POOLNAME}/${set}" "${STDOPTS[*]}"
+
+    xspin mkdir -p "/mnt/${set}"
+    xspin mount -t zfs -o zfsutil "${POOLNAME}/${set}" "/mnt/${set}"
+    dataset_mnt="/mnt/${set}"
+
+    # save the pool name for later use
+    tmppool="${POOLNAME}"
+    gum style "Select the LVM partition to copy:" 
+    readarray -t choices <<<"$(mount -t ext4 | awk '{print $3}')"
+    if (( ${#choices[@]} == 0 )); then
+            gum style "No ext4 filesystems found!"
+            exit 1
+    fi
+    filesystem=$(choose "${choices[@]}")
+    files=$(find "${filesystem}" | wc -l)
+    gum style "3) Copying ${filesystem} to ${dataset_mnt}" 
+    gum style --faint -- "rsync -avxHAX ${filesystem}/ ${dataset_mnt}"
+    rsync -avxHAX "${filesystem}/" "${dataset_mnt}" | pv -lep -s "${files}" > /dev/null
+
+    gum style "Commenting out LVM mounts in /etc/fstab"
+    xspin "sed -i 's|^/dev/pve|# Removed by zquickinit: &|' ${dataset_mnt}/etc/fstab"
+    gum style "Commenting out /boot/efi mounts in /etc/fstab"
+    xspin "sed -i 's|.*/boot/efi|# Removed by zquickinit: &|' ${dataset_mnt}/etc/fstab"
+
+    gum style "Unmounting ${POOLNAME}/${set}"
+    xspin zfs unmount "${POOLNAME}/${set}"
+    xspin zfs set mountpoint=/ canmount=noauto "${POOLNAME}/${set}"
+    
+    gum style "Unmounting and deactiving all LVM volumes"
+    xspin umount "${filesystem}"
+    xspin lvm vgchange -an
+
+    partition_drive
+    create_pool
+    defaultEsp=yes
+    install_esp $defaultEsp
+
+    if ! has_roots; then
+        ensure_ROOT
+    fi
+    
+    recv=()
+    send=()
+    if encroot="$( be_has_encroot "${POOLNAME}/ROOT" )"; then
+        if confirm --affirmative="Inherit" --negative="Use existing" "${POOLNAME}/ROOT is encrypted. Do you want to inherit encryption or use existing?"; then
+            recv+=(-o encryption=on "${STDOPTS[@]}")
+            gum style "Dataset will inherit ${POOLNAME}/ROOT encryption"
+        else
+            send+=(-cewp)
+            gum style "Dataset will be copied with original encryption (raw)"
+        fi
+    else
+        gum style "NOTE: ${POOLNAME}/ROOT is not encrypted"
+        gum style "Dataset will be copied with original encryption"
+        send+=(-cewp)
+    fi
+    xspin zfs snapshot -r "${tmppool}/${set}@snapshot"
+    size=$(zfs send -vnP ${send[@]} "${tmppool}/${set}@snapshot" | tail -n1 | awk '{print $NF}')
+    log "zfs send ${send[@]} ${tmppool}/${set}@snapshot | pv -Wpbafte -s $size -i 1 | zfs receive ${recv[@]} ${POOLNAME}/ROOT/${set}"
+    zfs send ${send[@]} "${tmppool}/${set}@snapshot" | pv -Wpbafte -s "$size" -i 1 | zfs receive ${recv[@]} "${POOLNAME}/ROOT/${set}"
+    xspin zpool set bootfs="${POOLNAME}/ROOT/${set}" "${POOLNAME}"
+    zpool_export -a
+
+    devs=$(lsblk --nodeps -n -o path)
+    for dev in ${devs}; do
+        log kpartx -u "$dev" 
+        kpartx -u "$dev" || true
+    done
+    xspin zpool import -a
+    for dev in ${devs}; do
+        # dmsetup will try to map these drives, so remove them
+        if command -v dmsetup >/dev/null 2>&1; then
+            dev=/$(echo "$dev" | cut -d/ -f3-)
+            log dmsetup remove /dev/mapper/"${dev}"*
+            dmsetup remove /dev/mapper/"${dev}"* >/dev/null 2>&1 || true
+        fi
+    done
+    gum style "Finished!"
+}
+
 gum style --bold --border double --align center \
         --width 50 --margin "1 2" --padding "0 2" "ZFSQuickInit Proxmox Installer"
 
 choices=("Install Proxmox 8.x" 
     "Chroot into ZFS root dataset" 
     "Encrypt existing dataset" 
+    "Convert LVM root to ZFS root dataset"
     # "Rollback to pre install and run install" 
     "Exit to shell")
 
@@ -570,9 +758,15 @@ if [[ "$choice" =~ ^Encrypt.* ]]; then
     gum style "* Encrypt Existing Dataset"
     zpool import -a
     select_pool
-    zpool export "$POOLNAME"
+    zpool_export "${POOLNAME}"
     zpool import "$POOLNAME"
     encrypt_ROOT
+fi
+if [[ "$choice" =~ ^Convert.* ]]; then
+    gum style "* Encrypt Existing Dataset"
+    zpool_export -a
+    zpool import -a
+    convertLVM
 fi
 if [[ "$choice" =~ ^Rollback.* ]]; then  
     gum style "* Rollback and install"

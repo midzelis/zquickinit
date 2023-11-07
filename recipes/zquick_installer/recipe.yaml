@@ -6,4 +6,7 @@ xbps-packages:
  - pv
  - pax
  - findutils
+ - rsync
+ - util-linux
+ - hdparm
 help: "Download and install proxmox to root partition"

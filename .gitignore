@@ -8,4 +8,5 @@ tailscaled.state*
 cache
 *test*
 *ssh_host*
-.code-workspace
+*.code-workspace
+authorized_keys

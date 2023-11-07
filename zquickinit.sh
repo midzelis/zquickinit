@@ -28,6 +28,7 @@ RECIPE_BUILDER="ghcr.io/midzelis/zquickinit"
 ZQUICKEFI_URL="https://github.com/midzelis/zquickinit/releases/latest"
 # if empty, use latest release tag
 ZBM_TAG=v2.2.1
+KERNEL_BOOT=
 ENGINE=
 OBJCOPY=
 FIND=
@@ -138,8 +139,9 @@ builder() {
 		ZBM_TAG=$(curl --silent https://api.github.com/repos/zbm-dev/zfsbootmenu/releases/latest | $YG .tag_name)
 	fi
 	ZBM_COMMIT_HASH=$(curl --silent "https://api.github.com/repos/zbm-dev/zfsbootmenu/git/ref/tags/${ZBM_TAG}" | $YG .object.sha)
-	echo "ZQuickInit commit: $(git rev-parse HEAD)"
-	echo "ZBM tag: $ZBM_TAG"
+	ZQUICKINIT_COMMIT_HASH=$(git rev-parse HEAD)
+	echo "ZQUICKINIT_COMMIT_HASH: $ZQUICKINIT_COMMIT_HASH"
+	echo "ZBM_TAG: $ZBM_TAG"
 	echo "ZBM_COMMIT_HASH: $ZBM_COMMIT_HASH"
 	echo
 	echo "Building with Packages: ${packages[*]}"
@@ -149,6 +151,7 @@ builder() {
 		--build-arg KERNELS=linux6.2
 		--build-arg "PACKAGES=${packages[*]}" 
 		--build-arg ZBM_COMMIT_HASH="${ZBM_COMMIT_HASH}"
+		--build-arg ZQUICKINIT_COMMIT_HASH="${ZQUICKINIT_COMMIT_HASH}"
 		--progress=plain)
 	((GITHUBACTION==1)) && cmd+=(--cache-from type=gha)
 	((GITHUBACTION==1)) && cmd+=(--cache-to type=gha,mode=max)
@@ -175,7 +178,7 @@ make_zquick_initramfs() {
 		echo "Downloading zquickinit"
 		rm -rf /input
 		git clone --quiet --depth 1 https://github.com/midzelis/zquickinit.git /input
-		hash=$(cat /etc/zquickinit-commit-hash)
+		hash=$(cat /etc/zquickinit-commit-hash || echo '')
 		if [[ -n "${hash}" ]]; then
 			(cd /input && git fetch --depth 1 origin "$hash" && git checkout FETCH_HEAD)
 		fi
@@ -221,6 +224,8 @@ make_zquick_initramfs() {
 		sorted=("$(sort <<<"${recipes[*]}")")
 		# shellcheck disable=SC2206
 		sorted=( ${sorted[@]/zquick_core} ) 
+		# shellcheck disable=SC2206
+		sorted=( ${sorted[@]/zquick_end} ) 
 		
 		gum style --bold --border double --align center \
                 --width 50 --margin "1 2" --padding "0 2" "Welcome to zquickinit" "(interactive mode)"
@@ -274,7 +279,7 @@ make_zquick_initramfs() {
 		system_hooks=("${system_hooks[@]/autodetect}")
 		((RELEASE==1)) && recipes=("${recipes[@]/zquick_qemu}")
 		((RELEASE==1)) && strip_sel=1 || system_hooks=("${system_hooks[@]/strip}")
-		((RELEASE==1)) && echo "zquickinit" > /etc/hostname
+		echo "zquickinit" > /etc/hostname
 	fi
 
 	# need to reorder strip/zfsbootmenu
@@ -293,6 +298,8 @@ make_zquick_initramfs() {
 	hooks+=(${recipes[@]})
 	# strip goes last
 	[[ -n $strip_sel ]] && hooks+=("strip")
+
+	hooks+=("zquick_end")
 
 	build_time=$(date -u +"%Y-%m-%d_%H%M%S");
 
@@ -406,7 +413,7 @@ initramfs() {
 	((ENTER==1)) && cmd+=(--entrypoint=/bin/bash -i)
 	cmd+=("$RECIPE_BUILDER")
 	((ENTER==0)) && cmd+=(make_zquick_initramfs)
-	((ENTER==0 && NOASK==1)) && cmd+=(--noask)
+	((ENTER==0 && NOASK==1)) && cmd+=(--no-ask)
 	((DEBUG==1)) && cmd+=(--debug)
 	((RELEASE==1)) && cmd+=(--release)
 	echo
@@ -492,7 +499,7 @@ inject() {
 
 		# shellcheck disable=SC2094
 		${FIND} "${tmp}" -not -path "${initrd}" -not -path "${source}" -print | \
-			pax -x sv4cpio -wd -s#"${tmp}"/tmp## | zstd >> "${initrd}"
+			pax -x sv4cpio -wd -s#"${tmp}"## | zstd >> "${initrd}"
 
 		echo "Copying new initramfs ${source} to EFI ${target}..."
 		cp "${source}" "${target}"
@@ -597,11 +604,18 @@ playground() {
 	fi
 
 	if [[ ! -e /tmp/disk.raw ]]; then
-		echo "NOTE! Creating 5GiB file at /tmp/disk.raw as a disk image"
-		truncate -s 5GiB /tmp/disk.raw
+		echo "NOTE! Creating 8GiB file at /tmp/disk.raw as a disk image"
+		truncate -s 8GiB /tmp/disk.raw
 	else
 		echo "NOTE! Using file /tmp/disk.raw as a disk image"
 	fi
+
+	# if [[ ! -e /tmp/disk2.raw ]]; then
+	# 	echo "NOTE! Creating 3GiB file at /tmp/disk2.raw as a disk image"
+	# 	truncate -s 3GiB /tmp/disk2.raw
+	# else
+	# 	echo "NOTE! Using file /tmp/disk2.raw as a disk image"
+	# fi
 
 	APPEND=("loglevel=6 zbm.show")
 	SSH_PORT=2222
@@ -613,16 +627,17 @@ playground() {
 	fi
 	# shellcheck disable=SC2054
 	args=(qemu-system-x86_64 
-		-m 8G 
+		-m 16G 
 		-smp "$(nproc)"
 		-object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-pci,rng=rng0 
 		-object iothread,id=iothread0
-		-object iothread,id=iothread1
-		-netdev user,id=n1,hostfwd=tcp::"${SSH_PORT}"-:22 -device virtio-net-pci,netdev=n1 
-		-device virtio-scsi-pci,id=scsi0,iothread=iothread0 
-		-device virtio-blk-pci,drive=drive1,iothread=iothread1
+		-netdev user,id=n1,hostfwd=tcp::"${SSH_PORT}"-:22,hostfwd=tcp::8006-:8006 -device virtio-net-pci,netdev=n1 
+		-device virtio-scsi-pci,id=scsi0,iothread=iothread0
+		-device scsi-hd,drive=drive1,bus=scsi0.0,bootindex=1,rotation_rate=1
+		# -device scsi-hd,drive=drive2,bus=scsi0.0,bootindex=2,rotation_rate=1
 		-fsdev local,id=f1,path=.,security_model=none -device virtio-9p-pci,fsdev=f1,mount_tag=qemuhost
-		-drive file=/tmp/disk.raw,format=raw,if=none,discard=unmap${aoi},cache=writeback,id=drive1
+		-drive file=/tmp/disk.raw,format=raw,if=none,discard=unmap${aoi},cache=writeback,id=drive1,unit=0
+		# -drive file=/tmp/disk2.raw,format=raw,if=none,discard=unmap${aoi},cache=writeback,id=drive2,unit=1
 		-serial "mon:stdio"
 	)
 	if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -667,17 +682,12 @@ playground() {
 	if [[ -n "$iso" ]]; then
 		args+=(-drive "file=${tmpiso},media=cdrom")
 		echo "ISO images automatically configure QEMU vnc server" 
-		args+=(-display vnc=0.0.0.0:0)
 		if [[ -z "${ovmf}" ]]; then
 			echo "EFI firmware is required for ISO images!"
 			exit 1;
 		fi
-		echo "Connect to VNC server running on port :5900"
 	else
-		args+=(-kernel "$kernel")
-		args+=(-initrd "$initrd")
-	fi
-	if [[ -z "${iso}" ]]; then
+		[[ -z "$KERNEL_BOOT" ]] && KERNEL_BOOT=1
 		if [[ -z "${SSHONLY}" ]]; then
 			LINES="$(tput lines)"
 			COLUMNS="$(tput cols)"
@@ -685,8 +695,15 @@ playground() {
 			[ -n "${COLUMNS}" ] && APPEND+=( "zbm.columns=${COLUMNS}" )
 			# shellcheck disable=SC2054
 			APPEND+=(console=ttyS0,115200n8);
-			args+=(-append "${APPEND[*]}")
 		fi
+	fi
+	if ((KERNEL_BOOT==1)); then
+		args+=(-kernel "$kernel")
+		args+=(-initrd "$initrd")
+		args+=(-append "${APPEND[*]}")
+	else
+		args+=(-display vnc=0.0.0.0:0)
+		echo "Not using serial console, VNC is running on 0.0.0.0:5900"
 	fi
 	echo
 	echo "Hint: to quit QEMU, press ctrl-a, x"
@@ -703,7 +720,7 @@ if [[ $(type -t "$command") == function ]]; then
 	while (($# > 0)); do
 		key="$1"
 		case $key in
-			--noask)
+			--no-ask)
 				NOASK=1
 			;;
 			-e|--enter)
@@ -716,11 +733,14 @@ if [[ $(type -t "$command") == function ]]; then
 			--release)
 				RELEASE=1
 			;;
-			--sshonly)
+			--ssh-only)
 				SSHONLY=1
 			;;
 			--githubaction)
 				GITHUBACTION=1
+			;;
+			--no-kernel)
+				KERNEL_BOOT=0
 			;;
 			*)
 			ARGS+=("$1")
@@ -775,10 +795,10 @@ else
 	echo "    ZQuickInit image functions!"
 	echo
 	echo "  Usage"
-	echo "    zquickinit.sh initramfs [--noask]"
+	echo "    zquickinit.sh initramfs [--no-ask]"
 	echo "    zquickinit.sh inject [target_efi] [source_efi]"
 	echo "    zquickinit.sh iso [target_iso] [source_efi] "
-	echo "    zquickinit.sh playground [--sshonly]"
+	echo "    zquickinit.sh playground [--ssh-only] [--no-kernel]"
 	echo
 	echo "  Advanced Usage"
 	echo "    zquickinit.sh builder"
@@ -793,9 +813,9 @@ else
 	echo "                  play around with zquickinit.efi" 
 	echo 
 	echo "  Options"
-	echo "    --noask       Do not ask any questions for building image. "
+	echo "    --no-ask      Do not ask any questions for building image. "
 	echo "                  Just use files in the current directory, if present."
-	echo "    --release     Do not add QEMU debug" 
+	echo "    --release     Do not add QEMU debug, or any secrets" 
 	echo "    -d,--debug    Advanced: Turn on tracing"
 	echo "    -e,--enter    Advanced: Do not build an image. Execute bash and"
 	echo "                  enter the builder image."
@@ -803,4 +823,8 @@ else
 	echo "                  if not specified."
 	echo "    target_efi    Where the results of the image after injection will"
 	echo "                  be stored. Default is zquickinit.efi in the current folder"
+	echo "   --ssh-only		Will launch playground without console output on ttyS0, you"
+	echo "                  must connect to playground using ssh on localhost:2222"
+	echo "   --no-kernel	Do not launch playground with kerenel image, boot from"
+	echo "                  configured drives instead"
 fi

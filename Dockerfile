@@ -95,7 +95,7 @@ ARG ZBM_COMMIT_HASH
 RUN <<-EOF 
 	# Record a commit hash if one was provided
 	if [ -n "${ZBM_COMMIT_HASH}" ]; then
-		echo "Using zfsbootmenu commit hash: ${ZQUICKINIT_COMMIT_HASH}"
+		echo "Using zfsbootmenu commit hash: ${ZBM_COMMIT_HASH}"
 		echo "${ZBM_COMMIT_HASH}" > /etc/zbm-commit-hash
 		mkdir -p /zbm
 		echo "Cloning https://github.com/zbm-dev/zfsbootmenu.git"
@@ -104,14 +104,16 @@ RUN <<-EOF
 	fi
 	EOF
 
+COPY . /input/
 # ZQuickInit source 
+ARG ZQUICKINIT_COMMIT_HASH
 RUN <<-EOF 
-	ZQUICKINIT_COMMIT_HASH=$(git rev-parse HEAD)
-	echo "Using zquickinit commit hash: ${ZQUICKINIT_COMMIT_HASH}"
-	echo "${ZQUICKINIT_COMMIT_HASH}" > /etc/zquickinit-commit-hash
+	if [ -n "${ZQUICKINIT_COMMIT_HASH}" ]; then
+		echo "Using zquickinit commit hash: ${ZQUICKINIT_COMMIT_HASH}"
+		echo "${ZQUICKINIT_COMMIT_HASH}" > /etc/zquickinit-commit-hash
+	fi
 	EOF
 
-COPY . /input/
 COPY --chmod=755 zquickinit.sh /
 
 # Run the build script with no arguments by default

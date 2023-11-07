@@ -51,6 +51,7 @@ _zquickinit_loadkey() {
                 return 0
             fi
         done
+        mkdir -p "/zquick/run/load_key/skip/$keydir"
         echo "$keyinput" > "/zquick/run/load_key/skip/$keydir/$keyfile"
     fi
     return 1

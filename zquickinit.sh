@@ -27,7 +27,9 @@ RECIPES_ROOT=${RECIPES_ROOT:-${SRC_ROOT}/recipes}
 RECIPE_BUILDER="ghcr.io/midzelis/zquickinit"
 ZQUICKEFI_URL="https://github.com/midzelis/zquickinit/releases/latest"
 # if empty, use latest release tag
-ZBM_TAG=v2.2.1
+ZBM_TAG=
+# if specified, takes precedence over ZBM_TAG
+ZBM_COMMIT_HASH=f23fc698c42220593a011cf6b58a0220452225f0
 KERNEL_BOOT=
 ENGINE=
 OBJCOPY=
@@ -39,15 +41,23 @@ ENTER=0
 RELEASE=0
 GITHUBACTION=0
 SSHONLY=
+NOQEMU=
+DRIVE1=1
+DRIVE1_GB=8
+DRIVE2=0
+DRIVE2_GB=3
+
 CLEANUP=()
 
 # shellcheck disable=SC2317
 cleanup() {
+	ret=$?
 	for c in "${CLEANUP[@]}"; do
 		if [[ -e "${c}" ]]; then
 			rm -rf "${c}"
 		fi
 	done
+	exit $ret
 }
 
 trap cleanup EXIT INT TERM
@@ -135,10 +145,12 @@ builder() {
 	# shellcheck disable=SC2016
 	mapfile -t -O "${#packages[@]}" packages < <($YG eval-all '. as $item ireduce ({}; . *+ $item) | (... | select(type == "!!seq")) |= unique | .xbps-packages[] | .. style=""' "$RECIPES_ROOT"/*/recipe.yaml)
 
-	if [[ -z "$ZBM_TAG" ]]; then
-		ZBM_TAG=$(curl --silent https://api.github.com/repos/zbm-dev/zfsbootmenu/releases/latest | $YG .tag_name)
+	if [[ -z "${ZBM_COMMIT_HASH}" ]]; then
+		if [[ -z "$ZBM_TAG" ]]; then
+			ZBM_TAG=$(curl --silent https://api.github.com/repos/zbm-dev/zfsbootmenu/releases/latest | $YG .tag_name)
+		fi
+		ZBM_COMMIT_HASH=$(curl --silent "https://api.github.com/repos/zbm-dev/zfsbootmenu/git/ref/tags/${ZBM_TAG}" | $YG .object.sha)
 	fi
-	ZBM_COMMIT_HASH=$(curl --silent "https://api.github.com/repos/zbm-dev/zfsbootmenu/git/ref/tags/${ZBM_TAG}" | $YG .object.sha)
 	ZQUICKINIT_COMMIT_HASH=$(git rev-parse HEAD)
 	echo "ZQUICKINIT_COMMIT_HASH: $ZQUICKINIT_COMMIT_HASH"
 	echo "ZBM_TAG: $ZBM_TAG"
@@ -208,7 +220,14 @@ make_zquick_initramfs() {
 		hook_dirs+=("${dir#"/recipes"}")
 		recipes+=("$(basename "$(dirname "$dir")")")
 	done
+	# zquick_core must always happen at the begining, so remove it and add it back later
+	# shellcheck disable=SC2206
+	recipes=( ${recipes[@]/zquick_core} )
 
+	# zquick_end must always happen at the end, so remove it and add it back later
+	# shellcheck disable=SC2206
+	recipes=( ${recipes[@]/zquick_end} )
+	
 	strip_sel=
 	if ((NOASK==0)); then 
 		check yq
@@ -217,15 +236,10 @@ make_zquick_initramfs() {
 		for recipe in /input/recipes/*/recipe.yaml; do
 			[[ ! -r $recipe ]] && continue
 			name=$(basename "$(dirname "$recipe")")
-			[[ $name == "zquick_core" ]] && continue
 			help+=" - \`$name\` - $(yq-go e '.help ' "$recipe")\n"
 		done
 
 		sorted=("$(sort <<<"${recipes[*]}")")
-		# shellcheck disable=SC2206
-		sorted=( ${sorted[@]/zquick_core} ) 
-		# shellcheck disable=SC2206
-		sorted=( ${sorted[@]/zquick_end} ) 
 		
 		gum style --bold --border double --align center \
                 --width 50 --margin "1 2" --padding "0 2" "Welcome to zquickinit" "(interactive mode)"
@@ -242,8 +256,6 @@ make_zquick_initramfs() {
 		selected=("${selected[@]}")
 		((RELEASE==1)) && selected=("${selected[@]/zquick_qemu}")
 
-		# always include core
-		recipes=(zquick_core)
 		# shellcheck disable=SC2207,SC2048,SC2086
 		recipes+=($(gum choose ${sorted[*]} --height=20 --no-limit --selected="${selected[*]}"))
 		
@@ -282,9 +294,8 @@ make_zquick_initramfs() {
 		echo "zquickinit" > /etc/hostname
 	fi
 
-	# need to reorder strip/zfsbootmenu
+	# need to reorder strip
 	[[ -n $strip_sel ]] && system_hooks=( ${system_hooks[@]/strip} ) 
-	system_hooks=( ${system_hooks[@]/zfsbootmenu} ) 
 
 	# zquick_core is first recipe, and always added
 	recipes=( zquick_core ${recipes[@]/zquick_core} ) 
@@ -421,15 +432,16 @@ initramfs() {
 }
 
 getefi() {
-	source=$(${FIND} . -type f -name '*.efi' -printf '%f\t%p\n' | sort -k1 | cut -d$'\t' -f2 | tail -n1)
+	source=$(${FIND} . -type f -name 'zquickinit*.efi' -printf '%f\t%p\n' | sort -k1 | cut -d$'\t' -f2 | tail -n1)
 	if [[ -r "$source" ]]; then
 		echo "Found EFI: ${source}"
 	else
 		source="${tmp}/zquickinit.efi"
-		echo "No image found, downloading image to ${source}..."
+		echo "No image found, finding latest release..."
 		local version='' download=''
 		version=$(curl --silent -qI "${ZQUICKEFI_URL}" | awk -F '/' '/^location/ {print  substr($NF, 1, length($NF)-1)}')
 		download="https://github.com/midzelis/zquickinit/releases/download/$version/zquickinit.efi"
+		echo "Downloading from ${download} to ${source}..."
 		curl -o "$source" --progress-bar -L "${download}" 
 	fi
 }
@@ -582,15 +594,15 @@ playground() {
 			check objcopy binutils
 			getefi
 			if [[ ! "${source}" -ef "zquickinit.efi" ]]; then 
-				echo "Copying EFI from $source to zquickinit.efi"
-				cp "$source" zquickinit.efi
+				echo "Moving $source to zquickinit.efi"
+				mv "$source" zquickinit.efi
 				source=zquickinit.efi
 			fi
 			initrd=${tmp}/zquickinit.img
-			echo "Extracting initramfs to ${initrd} from EFI ${source}"
+			echo "Extracting initramfs from ${source} to ${initrd}"
 			$OBJCOPY -O binary --only-section=.initrd "${source}" "${initrd}"
 			kernel=${tmp}/vmlinuz
-			echo "Extracting kernel to ${kernel} from EFI ${source}"
+			echo "Extracting kernel rom EFI ${source} to ${kernel}"
 			$OBJCOPY -O binary --only-section=.linux "${source}" "${kernel}"
 		fi
 	fi
@@ -603,19 +615,23 @@ playground() {
 		echo "Found initrd: ${initrd}"
 	fi
 
-	if [[ ! -e /tmp/disk.raw ]]; then
-		echo "NOTE! Creating 8GiB file at /tmp/disk.raw as a disk image"
-		truncate -s 8GiB /tmp/disk.raw
-	else
-		echo "NOTE! Using file /tmp/disk.raw as a disk image"
+	if ((DRIVE1==1)); then
+		if [[ ! -e /tmp/disk.raw ]]; then
+			echo "Drive1: Creating ${DRIVE1_GB}GiB file at /tmp/disk.raw as a disk image"
+			truncate -s ${DRIVE1_GB}GiB /tmp/disk.raw
+		else
+			echo "Drive1: Using file /tmp/disk.raw as a disk image"
+		fi
 	fi
 
-	# if [[ ! -e /tmp/disk2.raw ]]; then
-	# 	echo "NOTE! Creating 3GiB file at /tmp/disk2.raw as a disk image"
-	# 	truncate -s 3GiB /tmp/disk2.raw
-	# else
-	# 	echo "NOTE! Using file /tmp/disk2.raw as a disk image"
-	# fi
+	if ((DRIVE2==1)); then
+		if [[ ! -e /tmp/disk2.raw ]]; then
+			echo "Drive2: Creating ${DRIVE2_GB}GiB file at /tmp/disk2.raw as a disk image"
+			truncate -s ${DRIVE2_GB}GiB /tmp/disk2.raw
+		else
+			echo "Drive2: Using file /tmp/disk2.raw as a disk image"
+		fi
+	fi
 
 	APPEND=("loglevel=6 zbm.show")
 	SSH_PORT=2222
@@ -634,12 +650,16 @@ playground() {
 		-netdev user,id=n1,hostfwd=tcp::"${SSH_PORT}"-:22,hostfwd=tcp::8006-:8006 -device virtio-net-pci,netdev=n1 
 		-device virtio-scsi-pci,id=scsi0,iothread=iothread0
 		-device scsi-hd,drive=drive1,bus=scsi0.0,bootindex=1,rotation_rate=1
-		# -device scsi-hd,drive=drive2,bus=scsi0.0,bootindex=2,rotation_rate=1
-		-fsdev local,id=f1,path=.,security_model=none -device virtio-9p-pci,fsdev=f1,mount_tag=qemuhost
+		-device scsi-hd,drive=drive2,bus=scsi0.0,bootindex=2,rotation_rate=1
 		-drive file=/tmp/disk.raw,format=raw,if=none,discard=unmap${aoi},cache=writeback,id=drive1,unit=0
-		# -drive file=/tmp/disk2.raw,format=raw,if=none,discard=unmap${aoi},cache=writeback,id=drive2,unit=1
+		-drive file=/tmp/disk2.raw,format=raw,if=none,discard=unmap${aoi},cache=writeback,id=drive2,unit=1
 		-serial "mon:stdio"
 	)
+	if [[ -z "${NOQEMU}" ]]; then
+		args+=(-fsdev local,id=f1,path=.,security_model=none -device virtio-9p-pci,fsdev=f1,mount_tag=qemuhost)
+		cachedir=$(find . -name cache -type d)
+		[[ -n "$cachedir" ]] && args+=(-fsdev "local,id=f2,path=${cachedir},security_model=none" -device virtio-9p-pci,fsdev=f2,mount_tag=qemucache)
+	fi
 	if [[ "$OSTYPE" == "darwin"* ]]; then
 		args+=(-cpu host,-pdpe1gb -machine q35,accel=hvf)
 	else
@@ -653,7 +673,6 @@ playground() {
 		fi
 	fi
 
-	[[ -e cache ]] && args+=(-fsdev local,id=f2,path=cache,security_model=none -device virtio-9p-pci,fsdev=f2,mount_tag=qemucache)
 	if [[ -n "${SSHONLY}" ]]; then
 		if [[ -n "$iso" ]]; then
 			echo "zquickinit ISO images may not be configured for serial console, not setting -display none"
@@ -709,7 +728,10 @@ playground() {
 	echo "Hint: to quit QEMU, press ctrl-a, x"
 	[[ -n "${SSHONLY}" ]] && echo Running in SSH only mode, to enter SSH use command: ssh root@localhost -p 2222
 	echo
+	echo 	"${args[@]}"
 	read -n 1 -s -r -p "Press any key to launch QEMU"
+	echo
+	echo "Starting..."
 	"${args[@]}"
 }
 
@@ -736,11 +758,21 @@ if [[ $(type -t "$command") == function ]]; then
 			--ssh-only)
 				SSHONLY=1
 			;;
+			--no-qemu)
+				NOQEMU=1
+			;;
 			--githubaction)
 				GITHUBACTION=1
 			;;
 			--no-kernel)
 				KERNEL_BOOT=0
+			;;
+			--drive2)
+				DRIVE2=1
+				if [[ ${2:-} =~ ^[0-9]+$ ]]; then
+					DRIVE2_GB=$2
+					shift
+				fi
 			;;
 			*)
 			ARGS+=("$1")
@@ -798,7 +830,7 @@ else
 	echo "    zquickinit.sh initramfs [--no-ask]"
 	echo "    zquickinit.sh inject [target_efi] [source_efi]"
 	echo "    zquickinit.sh iso [target_iso] [source_efi] "
-	echo "    zquickinit.sh playground [--ssh-only] [--no-kernel]"
+	echo "    zquickinit.sh playground [--ssh-only] [--no-kernel] [--drive2]"
 	echo
 	echo "  Advanced Usage"
 	echo "    zquickinit.sh builder"
@@ -825,6 +857,7 @@ else
 	echo "                  be stored. Default is zquickinit.efi in the current folder"
 	echo "   --ssh-only		Will launch playground without console output on ttyS0, you"
 	echo "                  must connect to playground using ssh on localhost:2222"
-	echo "   --no-kernel	Do not launch playground with kerenel image, boot from"
+	echo "   --no-kernel	Do not launch playground with kernel image, boot from"
 	echo "                  configured drives instead"
+	echo "   --drive2 <GB>  Configure with an additional drive of size <GB>. (3 GiB default) "
 fi

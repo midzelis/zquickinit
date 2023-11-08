@@ -27,12 +27,13 @@ debootstrap() {
   export DEBROOT
 
   cleanup() {
+    ret=$?
     if [ -n "${DEBROOT:-}" ]; then
       rm -rf "${DEBROOT:-}"
       unset DEBROOT
     fi
 
-    exit
+    exit $ret
   }
 
   trap cleanup EXIT INT TERM

@@ -1,6 +1,7 @@
 #!/bin/bash
+name=$(basename "$0")
 log() {
-  echo "zquick: $1" > /dev/kmsg
+   logger -p user.notice -t "${name}" "$1"
 }
 
 # this is a one time task
@@ -39,13 +40,8 @@ for interface in $interfaces; do
 		[[ $interface == 'lo' ]] && continue
 		log "Getting IP address using DHCP"
 
-		mkdir -p /var/log
 		# only keep the funnel URL up for 30 minutes
-		if  dhclient -1 "$interface" -lf /var/lib/dhcp/dhclient.leases -v > /var/log/dhclient.log 2>&1 ; then
-				log "[$interface] DHCP OK"
-		else
-				log "[$interface] DHCP FAILED"
-		fi
+		dhclient "$interface" -lf /var/lib/dhcp/dhclient.leases || true
 done
 
 /zquick/libexec/run_hooks.sh ifup.d

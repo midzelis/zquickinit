@@ -46,7 +46,7 @@ DRIVE1=1
 DRIVE1_GB=8
 DRIVE2=0
 DRIVE2_GB=3
-
+NOCONTAINER=0
 CLEANUP=()
 
 # shellcheck disable=SC2317
@@ -114,6 +114,13 @@ check() {
 	fi
 	if ! command -v "$1" &>/dev/null; then
 		echo "$1 not found. usually part of the $2 package"
+		if [[ $1 == "gum" && -f "/etc/debian_version" ]]; then
+			echo "To install, try:"
+			echo 'sudo mkdir -p /etc/apt/keyrings'
+			echo 'curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg'
+			echo 'echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list'
+			echo 'sudo apt update && sudo apt install gum'
+		fi
 		exit 1
 	fi
 	if [[ $1 == find ]] && [[ -z "${FIND}" ]]; then
@@ -174,13 +181,16 @@ builder() {
 }
 
 # shellcheck disable=SC2317
-tailscale_node() {
+tailscale() {
+	check docker 
 	mkdir -p state ; $ENGINE run -it -e TS_EXTRA_ARGS=--ssh -e TS_STATE_DIR=/state -v "$(pwd)"/state:/state tailscale/tailscale ; mv state/tailscaled.state "$(pwd)" ; rm -rf state
 }
 
 # This command is designed to be ONLY run from inside the running container
 # shellcheck disable=SC2317
 make_zquick_initramfs() { 
+	check gum gum
+	check mkinitcpio mkinitcpio
 	gum style --bold --border double --align center \
 		--width 50 --margin "1 2" --padding "0 2" "Welcome to ZQuickInit make initramfs"
 
@@ -201,7 +211,7 @@ make_zquick_initramfs() {
 		echo "Downloading latest zfsbootmenu"
 		rm -rf /zbm
 		git clone --quiet --depth 1 https://github.com/zbm-dev/zfsbootmenu.git /zbm
-		hash=$(cat /etc/zbm-commit-hash)
+		hash=$(cat /etc/zbm-commit-hash || echo '')
 		if [[ -n "${hash}" ]]; then
 			(cd /zbm && git fetch --depth 1 origin "$hash" && git checkout FETCH_HEAD)
 		fi
@@ -236,10 +246,11 @@ make_zquick_initramfs() {
 		for recipe in /input/recipes/*/recipe.yaml; do
 			[[ ! -r $recipe ]] && continue
 			name=$(basename "$(dirname "$recipe")")
-			help+=" - \`$name\` - $(yq-go e '.help ' "$recipe")\n"
+			[[ $name == "zquick_core" ]] && continue
+			help+=" - \`$name\` - $($YG e '.help ' "$recipe")\n"
 		done
 
-		sorted=("$(sort <<<"${recipes[*]}")")
+		read -r -a sorted <<< "$(sort <<<"${recipes[*]}")"
 		
 		gum style --bold --border double --align center \
                 --width 50 --margin "1 2" --padding "0 2" "Welcome to zquickinit" "(interactive mode)"
@@ -257,12 +268,14 @@ make_zquick_initramfs() {
 		((RELEASE==1)) && selected=("${selected[@]/zquick_qemu}")
 
 		# shellcheck disable=SC2207,SC2048,SC2086
-		recipes+=($(gum choose ${sorted[*]} --height=20 --no-limit --selected="${selected[*]}"))
+		recipes=($(gum choose --height=20 --no-limit --selected="${selected[*]}" ${sorted[*]}))
 		
+		cont_warn=''
+		((NOCONTAINER==0)) && cont_warn="Note: autodetect won't work as expected when running within a container."
 		help_text=$(cat <<-EOF
 			# Which mkcpio system hooks would you like to include?
 			See https://wiki.archlinux.org/title/mkinitcpio#Common_hooks for more info. 
-			Note: autodetect won't work as expected when running within a container. 
+			${cont_warn}
 			<br>
 			EOF
 			)
@@ -272,8 +285,7 @@ make_zquick_initramfs() {
 		# shellcheck disable=SC2206
 		sorted=( ${sorted[@]} )
 		selected=$(IFS=, ; echo "${sorted[*]}")
-		selected=("${selected[@]/autodetect}")
-		((RELEASE==0)) && selected=("${selected[@]/strip}")
+		((NOCONTAINER==0)) && selected=("${selected[@]/autodetect}")
 		# shellcheck disable=SC2207,SC2048,SC2086
 		system_hooks=($(gum choose ${sorted[*]} --no-limit --selected="${selected[*]}"))
 
@@ -317,6 +329,7 @@ make_zquick_initramfs() {
 	mkdir -p /tmp
 	rm -rf /tmp/*
 	zquickinit=/input
+	mkdir -p /output
 	cat > /tmp/mkinitcpio.conf <<-EOF
 		MODULES=()
 		BINARIES=()
@@ -407,6 +420,11 @@ make_zquick_initramfs() {
 }
 
 initramfs() {
+	if ((NOCONTAINER==1)); then
+		RUNNING_IN_CONTAINER=1
+		make_zquick_initramfs
+		return $?
+	fi
 	check docker
 	echo
 	echo "Launching $ENGINE..."
@@ -774,6 +792,9 @@ if [[ $(type -t "$command") == function ]]; then
 					shift
 				fi
 			;;
+			--no-container)
+				NOCONTAINER=1
+			;;
 			*)
 			ARGS+=("$1")
 			;;
@@ -847,6 +868,7 @@ else
 	echo "  Options"
 	echo "    --no-ask      Do not ask any questions for building image. "
 	echo "                  Just use files in the current directory, if present."
+	echo "    --no-container Do not use containers to build initramfs"
 	echo "    --release     Do not add QEMU debug, or any secrets" 
 	echo "    -d,--debug    Advanced: Turn on tracing"
 	echo "    -e,--enter    Advanced: Do not build an image. Execute bash and"
@@ -859,5 +881,6 @@ else
 	echo "                  must connect to playground using ssh on localhost:2222"
 	echo "   --no-kernel	Do not launch playground with kernel image, boot from"
 	echo "                  configured drives instead"
-	echo "   --drive2 <GB>  Configure with an additional drive of size <GB>. (3 GiB default) "
+	echo "   --drive2 <GB>  Configure with an additional drive of size <GB>. (3 GiB default)"
+
 fi

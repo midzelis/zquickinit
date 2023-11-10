@@ -1,0 +1,8 @@
+#!/bin/bash
+
+run_earlyhook() {
+    mkdir -p /var/log
+    touch /var/log/messages
+    syslogd
+    klogd -c 4
+}

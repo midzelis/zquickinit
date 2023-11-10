@@ -1,7 +1,8 @@
 #!/bin/bash
 
+name=$(basename "$0")
 log() {
-  echo "zquick: $1" > /dev/kmsg
+   logger -p user.notice -t "${name}" "$1"
 }
 
 if command -v lvm >/dev/null 2>&1; then

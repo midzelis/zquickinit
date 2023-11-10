@@ -29,4 +29,6 @@ build() {
 
 	add_binary chsh
 	chroot "${BUILDROOT}" /bin/bash -c "chsh -s /bin/bash" > /dev/null
+	
+	add_runscript
 }

@@ -116,6 +116,9 @@ RUN <<-EOF
 
 COPY --chmod=755 zquickinit.sh /
 
+# use busybox-huge version (vs busybox.static) (for syslogd support)
+RUN [ -x /usr/bin/busybox ] && cp -f /usr/bin/busybox /usr/lib/initcpio/busybox
+
 # Run the build script with no arguments by default
 ENTRYPOINT [ "/zquickinit.sh" ]
 ENV RUNNING_IN_CONTAINER=1

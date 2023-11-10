@@ -1,7 +1,8 @@
 #!/bin/bash
 
+name=$(basename "$0")
 log() {
-  echo "zquick: $1" > /dev/kmsg
+   logger -p user.notice -t "${name}" "$1"
 }
 
 if [ ! -r /var/lib/tailscale/tailscaled.state ]; then 

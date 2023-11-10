@@ -8,4 +8,5 @@ xbps-packages:
  - lvm2
  - mkinitcpio-lvm2
  - thin-provisioning-tools
+ - busybox-huge
 help: "Required common dependencies to all recipes"

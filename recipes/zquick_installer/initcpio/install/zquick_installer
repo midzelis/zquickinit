@@ -4,7 +4,8 @@ build() {
 
 	zquick_add_fs
 	# shellcheck disable=SC2154
-	add_file "${zquickinit}/zquickinit.sh" /zquick/libexec/installer 755
+	add_file "${zquickinit_root}/zquickinit.sh" /zquick/zquickinit.sh 755
+
 	add_binary rsync 
 	add_binary blockdev
 	
@@ -32,10 +33,14 @@ build() {
 	add_binary umount
 	add_binary mount
 
-	add_binary gummiboot
-	add_file /etc/default/gummiboot
-	add_file /usr/lib/gummiboot/gummibootx64.efi
-
+	if [[ -e /usr/lib/gummiboot/gummibootx64.efi ]]; then
+		add_binary gummiboot
+		add_file /etc/default/gummiboot
+		add_file /usr/lib/gummiboot/gummibootx64.efi
+	else
+		add_binary bootctl
+		add_file /usr/lib/systemd/boot/efi/systemd-bootx64.efi
+	fi
 	add_binary objcopy
 	add_binary tee
 

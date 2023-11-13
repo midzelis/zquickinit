@@ -1,13 +1,16 @@
 #!/bin/bash
 
 build() {
-	add_file "${zquickinit_root}/zquickinit.sh" /zquick/zquickinit.sh
 	zquick_add_fs
 
 	add_binary clear
 	add_binary reset
 	add_binary strace
-	add_binary yq-go
+	if which yq-go >/dev/null; then
+		add_binary yq-go
+	else
+		add_binary yq
+	fi
 	add_binary gum
 	add_binary htop
 
@@ -27,8 +30,37 @@ build() {
 		done
 		EOF
 
-	add_binary chsh
-	chroot "${BUILDROOT}" /bin/bash -c "chsh -s /bin/bash" > /dev/null
+	add_binary usermod
+	chroot "${BUILDROOT}" usermod --shell /bin/bash root
+
+	# create wrapper for zfsbootmenu entry point
+	cp "${BUILDROOT}/libexec/zfsbootmenu-initcpio" "${BUILDROOT}/libexec/zfsbootmenu-initcpio.original"
+	rm "${BUILDROOT}/libexec/zfsbootmenu-initcpio"
+ 	cat > "${BUILDROOT}/libexec/zfsbootmenu-initcpio" <<-'EOF'
+		#!/bin/bash
+		echo "Triggering uevents..."
+		udevadm trigger --action=add --type=subsystems
+		udevadm trigger --action=add --type=devices
+		udevadm settle
+		echo "Triggering ddd..."
+		exec bash /libexec/zfsbootmenu-initcpio.original
+		EOF
+    chmod 755 "${BUILDROOT}/libexec/zfsbootmenu-initcpio"
 	
+	# UDEV stuff
+	add_file "/etc/udev/udev.conf"
+    add_binary /usr/bin/udevd
+    add_binary /usr/bin/udevadm
+
+    for rule in 50-udev-default.rules 60-persistent-storage.rules 64-btrfs.rules 80-drivers.rules; do
+	echo $rule
+        add_file "/usr/lib/udev/rules.d/$rule"
+    done
+
+    for tool in ata_id scsi_id; do
+        add_file "/usr/lib/udev/$tool"
+    done
+	# end UDEV
 	add_runscript
 }
+# https://pkginfo.devuan.org/cgi-bin/package-query.html?c=package&q=eudev=3.2.14-1

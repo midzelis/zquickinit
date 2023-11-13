@@ -19,6 +19,7 @@ while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 
 
+: "${ZBM:=/zbm}"
 
 DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
 SRC_ROOT=${DIR}
@@ -30,6 +31,9 @@ ZQUICKEFI_URL="https://github.com/midzelis/zquickinit/releases/latest"
 ZBM_TAG=
 # if specified, takes precedence over ZBM_TAG
 ZBM_COMMIT_HASH=f23fc698c42220593a011cf6b58a0220452225f0
+INPUT=/input
+OUTPUT=/output
+MKINIT_VERBOSE=
 KERNEL_BOOT=
 ENGINE=
 OBJCOPY=
@@ -192,41 +196,42 @@ tailscale() {
 make_zquick_initramfs() { 
 	check gum gum
 	check mkinitcpio mkinitcpio
+	check blkid
 	gum style --bold --border double --align center \
 		--width 50 --margin "1 2" --padding "0 2" "Welcome to ZQuickInit make initramfs"
 
 	[[ -z $RUNNING_IN_CONTAINER ]] && echo _internal-run must be run from inside container && exit 1
-	if [[ ! -d /input ]]; then
+	if [[ ! -d "${INPUT}" ]]; then
 		local hash
 		echo "Downloading zquickinit"
-		rm -rf /input
-		git clone --quiet --depth 1 https://github.com/midzelis/zquickinit.git /input
+		rm -rf "${INPUT}"
+		git clone --quiet --depth 1 https://github.com/midzelis/zquickinit.git "${INPUT}"
 		hash=$(cat /etc/zquickinit-commit-hash || echo '')
 		if [[ -n "${hash}" ]]; then
-			(cd /input && git fetch --depth 1 origin "$hash" && git checkout FETCH_HEAD)
+			(cd "${INPUT}" && git fetch --depth 1 origin "$hash" && git checkout FETCH_HEAD)
 		fi
 	fi
-	(cd /input && git config --global --add safe.directory /input && git rev-parse HEAD > /etc/zquickinit-commit-hash && echo "ZQuickInit (https://github.com/midzelis/zquickinit) commit hash: $(git rev-parse --short HEAD) ($(git rev-parse HEAD))")
+	(cd "${INPUT}" && git config --global --add safe.directory "${INPUT}" && git rev-parse HEAD > /etc/zquickinit-commit-hash && echo "ZQuickInit (https://github.com/midzelis/zquickinit) commit hash: $(git rev-parse --short HEAD) ($(git rev-parse HEAD))")
 
-	if [[ ! -d /zbm ]]; then
+	if [[ ! -d "${ZBM}" ]]; then
 		echo "Downloading latest zfsbootmenu"
-		rm -rf /zbm
-		git clone --quiet --depth 1 https://github.com/zbm-dev/zfsbootmenu.git /zbm
+		rm -rf "${ZBM}"
+		git clone --quiet --depth 1 https://github.com/zbm-dev/zfsbootmenu.git "${ZBM}"
 		hash=$(cat /etc/zbm-commit-hash || echo '')
 		if [[ -n "${hash}" ]]; then
-			(cd /zbm && git fetch --depth 1 origin "$hash" && git checkout FETCH_HEAD)
+			(cd "${ZBM}" && git fetch --depth 1 origin "$hash" && git checkout FETCH_HEAD)
 		fi
 	fi
 
-	(cd /zbm && git config --global --add safe.directory /zbm && git rev-parse HEAD > /etc/zbm-commit-hash && echo "ZBM (https://github.com/zbm-dev/zfsbootmenu) commit hash: $(git rev-parse --short HEAD) ($(git rev-parse HEAD))")
+	(cd "${ZBM}" && git config --global --add safe.directory "${ZBM}" && git rev-parse HEAD > /etc/zbm-commit-hash && echo "ZBM (https://github.com/zbm-dev/zfsbootmenu) commit hash: $(git rev-parse --short HEAD) ($(git rev-parse HEAD))")
 
 	hooks=()
 	hook_dirs=()
 
-	system_hooks=(autodetect base udev modconf block filesystems keyboard strip lvm2)
+	system_hooks=(autodetect base modconf block filesystems keyboard strip)
 
 	recipes=()
-	for dir in /input/recipes/*/initcpio; do
+	for dir in "${INPUT}"/recipes/*/initcpio; do
 		[[ ! -d $dir ]] && continue
 		hook_dirs+=("${dir#"/recipes"}")
 		recipes+=("$(basename "$(dirname "$dir")")")
@@ -244,7 +249,7 @@ make_zquick_initramfs() {
 		check yq
 
 		help=
-		for recipe in /input/recipes/*/recipe.yaml; do
+		for recipe in "${INPUT}"/recipes/*/recipe.yaml; do
 			[[ ! -r $recipe ]] && continue
 			name=$(basename "$(dirname "$recipe")")
 			[[ $name == "zquick_core" ]] && continue
@@ -296,8 +301,8 @@ make_zquick_initramfs() {
 		fi
 
 		for recipe in "${recipes[@]}"; do
-			[[ ! -x /input/recipes/${recipe}/setup.sh ]] && continue
-			"/input/recipes/${recipe}/setup.sh"
+			[[ ! -x "${INPUT}"/recipes/${recipe}/setup.sh ]] && continue
+			"${INPUT}recipes/${recipe}/setup.sh"
 		done
 
 	else
@@ -329,8 +334,8 @@ make_zquick_initramfs() {
 
 	mkdir -p /tmp
 	rm -rf /tmp/*
-	zquickinit=/input
-	mkdir -p /output
+	zquickinit="${INPUT}"
+	mkdir -p "${OUTPUT}"
 	cat > /tmp/mkinitcpio.conf <<-EOF
 		MODULES=()
 		BINARIES=()
@@ -373,15 +378,48 @@ make_zquick_initramfs() {
 				add_file "\$file" \$1
 			fi
 		}
+		
+		z_add_full_dir() {
+			# Add a directory and all its contents, recursively, to the initcpio image.
+			# No parsing is performed and the contents of the directory is added as is.
+			#   \$1: path to directory
+			#   \$2: glob pattern to filter file additions (optional)
+			#   \$3: path prefix that will be stripped off from the image path (optional)
+			local f='' filter="\${2:-*}" strip_prefix="\$3"
+
+			if [[ -n "\$1" && -d "\$1" ]]; then
+				add_dir "\${1#"\${strip_prefix}"}"
+
+				for f in "\$1"/*; do
+					if [[ -L "\$f" ]]; then
+						# Explicit glob matching
+						# shellcheck disable=SC2053
+						if [[ "\$f" == \$filter ]]; then
+							add_symlink "\${f#"\${strip_prefix}"}" "\$(readlink "\$f")"
+						fi
+					elif [[ -d "\$f" ]]; then
+						z_add_full_dir "\$f" "\$filter" "\$strip_prefix"
+					elif [[ -f "\$f" ]]; then
+						# Explicit glob matching
+						# shellcheck disable=SC2053
+						if [[ "\$f" == \$filter ]]; then
+							add_file "\$f" "\${f#"\${strip_prefix}"}"
+						fi
+					fi
+				done
+			fi
+		}
 
 		zquick_add_fs() {
 			local recipe="\$(find_recipe)"
+			
 			[[ -n "\${recipe}" ]] && \
-				add_full_dir "$zquickinit"/recipes/"\${recipe}"/fs "*" "$zquickinit"/recipes/"\${recipe}"/fs || \
+				z_add_full_dir "$zquickinit"/recipes/"\${recipe}"/fs "*" "$zquickinit"/recipes/"\${recipe}"/fs || \
 				warning "Could not find recipe, not adding filesystem."
+			
 		}
 
-		zfsbootmenu_module_root="/zbm/zfsbootmenu"
+		zfsbootmenu_module_root="${ZBM}"/zfsbootmenu
 		zfsbootmenu_early_setup=()
 		zfsbootmenu_setup=()
 		zfsbootmenu_teardown=()
@@ -398,33 +436,42 @@ make_zquick_initramfs() {
 		ANSI_COLOR="0;38;2;71;128;97"
 		EOF
 
-	hook_dirs+=("/zbm/initcpio")
+	hook_dirs+=("${ZBM}/initcpio")
 	hook_dirs+=("/usr/lib/initcpio")
 	hookdirs+=("${hook_dirs[@]/#/--hookdir }")
 
-	output_img=/output/zquickinit-$build_time.img
-	output_uki="/output/zquickinit-$build_time.efi" 
+	output_img="${OUTPUT}/zquickinit-$build_time.img"
+	output_uki="${OUTPUT}/zquickinit-$build_time.efi"
 	kernel=$(basename "$(find "/lib/modules" -maxdepth 1 -type d| grep "/lib/modules/" | sort -V | tail -n 1)")
 
-	mkinitcpio --config /tmp/mkinitcpio.conf ${hookdirs[*]} \
-		--kernel "$kernel" \
+	echo mkinitcpio --config /tmp/mkinitcpio.conf ${hookdirs[*]} \
+		--kernel "$kernel" "$MKINIT_VERBOSE" \
 		--osrelease /tmp/os-release \
 		--cmdline /tmp/cmdline \
 		--generate "$output_img" \
 		-U "$output_uki" 
-	cp "/boot/vmlinuz-$kernel" "/output/vmlinuz-$kernel"
-	(cd output; rm -rf zquickinit.efi; ln -s zquickinit-$build_time.efi zquickinit.efi)
-	chmod o+rw -R output/*
-	chmod g+rw -R output/*
-	env LC_ALL=en_US.UTF-8 printf "Kernel size: \t\t%'.0f bytes\n" "$(stat -c '%s' "output/vmlinuz-$kernel")"
+
+	mkinitcpio --config /tmp/mkinitcpio.conf ${hookdirs[*]} \
+		--kernel "$kernel" "$MKINIT_VERBOSE" \
+		--osrelease /tmp/os-release \
+		--cmdline /tmp/cmdline \
+		--generate "$output_img" \
+		-U "$output_uki" 
+	cp "/boot/vmlinuz-$kernel" "${OUTPUT}/vmlinuz-$kernel"
+	(cd "${OUTPUT}"; rm -rf zquickinit.efi; ln -s zquickinit-$build_time.efi zquickinit.efi)
+	chmod o+rw -R "${OUTPUT}"/*
+	chmod g+rw -R "${OUTPUT}"/*
+	env LC_ALL=en_US.UTF-8 printf "Kernel size: \t\t%'.0f bytes\n" "$(stat -c '%s' "${OUTPUT}/vmlinuz-$kernel")"
 	env LC_ALL=en_US.UTF-8 printf "initramfs size: \t%'.0f bytes\n" "$(stat -c '%s' "$output_img")"
 	env LC_ALL=en_US.UTF-8 printf "EFI size: \t\t%'.0f bytes\n" "$(stat -c '%s' "$output_uki")"
-	find output -name 'zquickinit*.img' | sort -r | tail -n +4 | xargs -r rm
-	find output -name 'zquickinit*.efi' | sort -r | tail -n +4 | xargs -r rm
+	find "${OUTPUT}" -name 'zquickinit*.img' | sort -r | tail -n +4 | xargs -r rm
+	find "${OUTPUT}" -name 'zquickinit*.efi' | sort -r | tail -n +4 | xargs -r rm
 }
 
 initramfs() {
 	if ((NOCONTAINER==1)); then
+		INPUT=$(pwd)
+		OUTPUT=$(pwd)/output
 		RUNNING_IN_CONTAINER=1
 		make_zquick_initramfs
 		return $?
@@ -616,11 +663,11 @@ playground() {
 			echo "ISO zquickinit.iso not found: searching for EFI image"
 			check objcopy binutils
 			getefi
-			if [[ ! "${source}" -ef "zquickinit.efi" ]]; then 
-				echo "Moving $source to zquickinit.efi"
-				mv "$source" zquickinit.efi
-				source=zquickinit.efi
-			fi
+			# if [[ ! "${source}" -ef "zquickinit.efi" ]]; then 
+			# 	echo "Moving $source to zquickinit.efi"
+			# 	mv "$source" zquickinit.efi
+			# 	source=zquickinit.efi
+			# fi
 			initrd=${tmp}/zquickinit.img
 			echo "Extracting initramfs from ${source} to ${initrd}"
 			$OBJCOPY -O binary --only-section=.initrd "${source}" "${initrd}"
@@ -736,13 +783,14 @@ playground() {
 			[ -n "${LINES}" ] && APPEND+=( "zbm.lines=${LINES}" )
 			[ -n "${COLUMNS}" ] && APPEND+=( "zbm.columns=${COLUMNS}" )
 			# shellcheck disable=SC2054
-			APPEND+=(console=ttyS0,115200n8);
+			APPEND+=(console=ttyS0,115200n8 rd.debug rd.log=console);
 		fi
 	fi
 	if ((KERNEL_BOOT==1)); then
 		args+=(-kernel "$kernel")
 		args+=(-initrd "$initrd")
-		args+=(-append "${APPEND[*]}")
+		# args+=(-append "${APPEND[*]}")
+		args+=(-display vnc=0.0.0.0:0)
 	else
 		args+=(-display vnc=0.0.0.0:0)
 		echo "Not using serial console, VNC is running on 0.0.0.0:5900"
@@ -774,6 +822,9 @@ if [[ $(type -t "$command") == function ]]; then
 			-d|--debug)
 				DEBUG=1
 				set -x
+			;;
+			-v)
+				MKINIT_VERBOSE="-v"
 			;;
 			--release)
 				RELEASE=1
@@ -885,6 +936,7 @@ else
 	echo "    -d,--debug    Advanced: Turn on tracing"
 	echo "    -e,--enter    Advanced: Do not build an image. Execute bash and"
 	echo "                  enter the builder image."
+	echo "    -v            Use verbose mode for mkinitcpio"
 	echo "    source_efi    The zquickinit source image or download from GitHub image"
 	echo "                  if not specified."
 	echo "    target_efi    Where the results of the image after injection will"

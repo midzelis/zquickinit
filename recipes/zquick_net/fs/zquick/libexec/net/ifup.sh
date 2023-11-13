@@ -11,8 +11,8 @@ touch /zquick/run/ifup
 
 mkdir -p /var/lib/dhcp
 mkdir -p /etc/dhcp
-touch /etc/fstab
-touch /etc/resolv.conf
+[[ ! -e /etc/fstab ]] && rm -f /etc/fstab; touch /etc/fstab
+[[ ! -e /etc/resolv.conf ]] && rm -f /etc/resolv.conf; touch /etc/resolv.conf
 
 cat > /etc/dhcp/dhclient.conf <<-EOF
 	timeout 30;

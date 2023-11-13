@@ -4,7 +4,8 @@
 
 build() {
 	add_full_dir /usr/share/terminfo
-
+	[[ -d /lib/terminfo ]] && add_full_dir /lib/terminfo
+	
 	if [ -e "/usr/lib/locale/locale-archive" ]; then
 		add_file "/usr/lib/locale/locale-archive" "/usr/lib/locale/locale-archive"
 	fi

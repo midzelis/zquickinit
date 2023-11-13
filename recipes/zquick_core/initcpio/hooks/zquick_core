@@ -5,4 +5,8 @@ run_earlyhook() {
     touch /var/log/messages
     syslogd
     klogd -c 4
+
+    udevd --daemon --resolve-names=never
+    udevd_running=1
 }
+

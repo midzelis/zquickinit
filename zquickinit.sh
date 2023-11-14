@@ -42,6 +42,7 @@ RELEASE=0
 GITHUBACTION=0
 SSHONLY=
 NOQEMU=
+SECRETS=
 DRIVE1=1
 DRIVE1_GB=8
 DRIVE2=0
@@ -356,11 +357,14 @@ make_zquick_initramfs() {
 			local filename=\$(basename \$1)
 			local dirname=\$(dirname \$1)
 			local file=
-			# shellcheck disable=SC2154
-			for path in "\$dirname" "$zquickinit"; do
-				[[ -f "\$path/\$filename" ]] && file="\$path/\$filename" && break
-			done
-
+			if [[ -n "${SECRETS}" ]]; then
+				[[ -f "${zquickinit}/${SECRETS}/\$filename" ]] && file="${zquickinit}/${SECRETS}/\$filename"
+			else 
+				# shellcheck disable=SC2154
+				for path in "\$dirname" "$zquickinit"; do
+					[[ -f "\$path/\$filename" ]] && file="\$path/\$filename" && break
+				done
+			fi
 			if [ ! -r "\$file" ]; then
 				warning "\$2 (\$filename) not found during build time"
 				return 1
@@ -438,13 +442,14 @@ initramfs() {
 	echo "bind-mount: $SRC_ROOT/output to /output (read-write)"
 	mkdir -p "$SRC_ROOT/output"
 	[[ -d "$SRC_ROOT/output" ]] && cmd+=(-v "$SRC_ROOT/output:/output")
-
+	
 	((ENTER==1)) && cmd+=(--entrypoint=/bin/bash -i)
 	cmd+=("$RECIPE_BUILDER")
 	((ENTER==0)) && cmd+=(make_zquick_initramfs)
 	((ENTER==0 && NOASK==1)) && cmd+=(--no-ask)
 	((DEBUG==1)) && cmd+=(--debug)
 	((RELEASE==1)) && cmd+=(--release)
+	[[ -n "$SECRETS" ]] && cmd+=(--secrets "$SECRETS")
 	echo
 	"${cmd[@]}"
 }
@@ -792,6 +797,12 @@ if [[ $(type -t "$command") == function ]]; then
 					shift
 				fi
 			;;
+			--secrets)
+				if [[ -n ${2:-} ]]; then
+					SECRETS=$2
+					shift
+				fi
+			;;
 			--no-container)
 				NOCONTAINER=1
 			;;
@@ -869,7 +880,8 @@ else
 	echo "    --no-ask      Do not ask any questions for building image. "
 	echo "                  Just use files in the current directory, if present."
 	echo "    --no-container Do not use containers to build initramfs"
-	echo "    --release     Do not add QEMU debug, or any secrets" 
+	echo "    --release     Do not add QEMU debug, or any secrets"
+	echo "    --secrets <dir> Use this folder for secrets."
 	echo "    -d,--debug    Advanced: Turn on tracing"
 	echo "    -e,--enter    Advanced: Do not build an image. Execute bash and"
 	echo "                  enter the builder image."

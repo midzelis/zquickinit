@@ -2,14 +2,13 @@
 
 set -euo pipefail
 
-if [ ! -r /var/lib/tailscale/tailscaled.state ]; then 
+if [[ ! -r /var/lib/tailscale/tailscaled.state ]]; then 
 	exit 0
 fi
 
 start() {
-    dns
-    name=$(tailscale status --json | yq-go e '.Self.DNSName | .. |= sub("\.$", "")' -oy)
-    randompath=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+    dnsname=$(tailscale status --json | yq-go e '.Self.DNSName | .. |= sub("\.$", "")' -oy)
+    randompath=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1) || true
 
     PUSHOVER_APP_TOKEN=
     PUSHOVER_USER_KEY=
@@ -30,12 +29,10 @@ start() {
             --form-string "sound=intermission" \
             https://api.pushover.net/1/messages >> /dev/null
 
-        tailscale serve https "/$randompath" "http://localhost:80/$randompath"
-        tailscale funnel 443 on
-
         mkdir -p /var/log
+        tailscale funnel --bg --https=443 "http://localhost:80/$randompath" >> /var/log/ttyd.log
         # only keep the funnel URL up for 30 minutes
-        timeout -k 1s 30m ttyd -i 127.0.0.1 -p 80 -b "/$randompath" tmux new-session -A -s ZFSBootMenu > /var/log/ttyd.log 2>&1 
+        timeout -k 1s 30m ttyd -i 127.0.0.1 -p 80 -b "/$randompath" tmux new-session -A -s ZFSBootMenu >> /var/log/ttyd.log 2>&1 
 
         curl -s \
             --form-string "token=$PUSHOVER_APP_TOKEN" \
@@ -44,7 +41,8 @@ start() {
             --form-string "sound=intermission" \
             https://api.pushover.net/1/messages >> /dev/null
 
-        tailscale serve reset
-        tailscale funnel 443 off
+        tailscale funnel --https=443 off
     fi
 }
+
+start

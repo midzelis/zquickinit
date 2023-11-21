@@ -26,3 +26,4 @@ if confirm "Enable sshd and autogenerate host keys?"; then
 		echo "$out" > /root/.ssh/authorized_keys
 	fi
 fi
+

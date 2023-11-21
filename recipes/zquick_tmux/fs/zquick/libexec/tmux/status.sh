@@ -21,3 +21,4 @@ else
 fi
 status+="#[fg=colour255,bg=colour17]]"
 echo "$status"
+

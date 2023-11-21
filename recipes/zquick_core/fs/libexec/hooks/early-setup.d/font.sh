@@ -22,3 +22,4 @@ for font in $fonts; do
         break
     fi
 done
+

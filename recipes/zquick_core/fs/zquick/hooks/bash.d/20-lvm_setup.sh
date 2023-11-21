@@ -37,3 +37,4 @@ if command -v lvm >/dev/null 2>&1; then
     done
     ((count==0)) && echo "No volumes found"
 fi
+

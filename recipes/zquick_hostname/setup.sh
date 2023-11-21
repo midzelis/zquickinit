@@ -17,3 +17,4 @@ help_text=$(cat <<-EOF
 gum format "${help_text}" " "
 name=$(input --value zquickinit --placeholder hostname)
 [[ -n $name ]] && echo "$name" > /etc/hostname ||  echo "zquickinit" > /etc/hostname
+

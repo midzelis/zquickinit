@@ -13,3 +13,4 @@ if [[ -r /etc/ssh/sshd_config && -r /root/.ssh/authorized_keys ]]; then
 else
     log "sshd SKIPPED"
 fi
+

@@ -46,3 +46,4 @@ for interface in $interfaces; do
 done
 
 /zquick/libexec/run_hooks.sh ifup.d
+

@@ -25,3 +25,4 @@ if [[ -n "${user_token}" ]]; then
 		echo "PUSHOVER_APP_TOKEN=$app_token" >> /zquick/etc/ttyd_pushover.conf
 	fi
 fi
+

@@ -12,3 +12,4 @@ if [[ -n $out ]]; then
 	mkdir -p /var/lib/tailscale
 	echo "$out" > /var/lib/tailscale/tailscaled.state
 fi
+

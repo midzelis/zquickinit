@@ -16,3 +16,4 @@ if [[ -n "${PUSHOVER_APP_TOKEN}" ]] && [[ -n "${PUSHOVER_USER_KEY}" ]]; then
         https://api.pushover.net/1/messages >> /dev/null
 
 fi
+

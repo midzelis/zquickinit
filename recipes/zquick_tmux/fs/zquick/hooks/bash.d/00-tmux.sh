@@ -7,3 +7,4 @@ if [[ -z $TMUX ]]; then
     echo "tmux exited with error, starting shell..."
     exec /bin/sh
 fi
+

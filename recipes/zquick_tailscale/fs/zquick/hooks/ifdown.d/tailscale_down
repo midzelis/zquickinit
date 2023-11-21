@@ -6,4 +6,5 @@ log() {
 }
 
 log "Tailscale - Closing SSH sessions"
-pkill -HUP ssh
+pkill -HUP sshd
+pkill -HUP login

@@ -142,7 +142,7 @@ install_esp() {
     if confirm --default=${1:-no} "Install/Update ZFSQuickInit on EFI System Partition?"; then
         gum style "* Install/Update ZFSQuickInit"
         local devs='' esps=''
-        esps=$(lsblk -o PATH,SIZE,TYPE,PARTTYPENAME,PARTTYPE -J | yq-go '.blockdevices.[] | select(.parttype=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b") | .path')
+        esps=$(lsblk -o PATH,SIZE,TYPE,PARTTYPENAME,PARTTYPE -J | yq '.blockdevices.[] | select(.parttype=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b") | .path')
         devs=$(lsblk -n -o PATH,SIZE,TYPE,PARTTYPENAME,PARTLABEL $esps)
         readarray -t choices <<<"$devs"
 
@@ -156,14 +156,22 @@ install_esp() {
             gum style "Selected: $ESP"
             gum style ""
         fi
-        if confirm "Format $ESP with FAT32 and install gummiboot?"; then
+        kind=gummiboot
+        if which bootctl > /dev/null; then
+            kind=systemd-boot
+        fi
+        if confirm "Format $ESP with FAT32 and install ${kind}?"; then
             gum style "Format $ESP with FAT32"
             gum style ""
             xspin mkfs.fat -F 32 -v "$ESP"
             mount_esp "$ESP"
             gum style ""
-            gum style "Installing gummiboot to /efi"
-            xspin gummiboot install --path=/efi --no-variables
+            gum style "Installing ${kind} to /efi"
+            if [[ "${kind}" = "gummiboot" ]]; then
+                xspin gummiboot install --path=/efi --no-variables
+            else 
+                xspin bootctl install --path=/efi --no-variables
+            fi
             gum style ""
         else    
             gum style --foreground="#ff70a6" "Did not format $ESP"
@@ -184,15 +192,13 @@ install_esp() {
             # end QEMU envs
             (
                 export INSTALLER_MODE=1
-                "$INJECT_SCRIPT" inject /efi/EFI/zquickinit.efi "$efi"
+                debugopt=
+                [ "${DEBUG,,}" = "true" ] && debugopt="-d"
+                "$INJECT_SCRIPT" inject --add-loader "$efi" "${debugopt}"
             )
-            echo "title    zquickinit"                > /efi/loader/entries/zquickinit.conf
-            echo "options  zfsbootmenu ro loglevel=6 zbm.autosize=0"   >> /efi/loader/entries/zquickinit.conf
-            echo "linux    /EFI/zquickinit.efi"       >> /efi/loader/entries/zquickinit.conf
-            echo "timeout 3"                            > /efi/loader/loader.conf
             gum style ""
         fi
-        mountpoint -q /efi && umount /efi
+        #mountpoint -q /efi && umount /efi
     fi
 }
 
@@ -222,14 +228,17 @@ partition_drive() {
             umount "$DEV"?* >/dev/null 2>&1 || true
             gum spin --spinner=points --title="Clearing partition" -- sgdisk -og "$DEV" > /dev/null
             gum spin --spinner=points --title="Creating BIOS Boot Partition" -- sgdisk -n 1:2048:+1M -c 1:"BIOS Boot Partition" -t 1:ef02 "$DEV" > /dev/null
-            gum spin --spinner=points --title="Creating EFI System Partition" -- sgdisk -n 2:0:+512M -c 2:"EFI System Partition" -t 2:ef00 "$DEV" > /dev/null
-            gum spin --spinner=points --title="Creating ZFS Partition" -- sgdisk -I -n 3:0:-1M -c 3:"ZFS Root Partition" -t 3:bf01 "$DEV" > /dev/null
+            gum spin --spinner=points --title="Creating EFI System Partition" -- sgdisk -a 1048576 -n 2:0:+512M -c 2:"EFI System Partition" -t 2:ef00 "$DEV" > /dev/null
+            end_position=$(sgdisk -E "$DEV")
+            # align end position to nearest 1048576
+            end_position=$(( end_position - (end_position + 1) % 2048 ))
+            gum spin --spinner=points --title="Creating ZFS Partition" -- sgdisk -a 1048576 -n 3:0:${end_position} -c 3:"ZFS Root Partition" -t 3:bf01 "$DEV" > /dev/null
             tput rc
             tput ed
             log sgdisk -og "$DEV"
             log sgdisk -n 1:2048:+1M -c 1:"BIOS Boot Partition" -t 1:ef02 "$DEV" 
-            log sgdisk -n 2:0:+512M -c 2:"EFI System Partition" -t 2:ef00 "$DEV" 
-            log sgdisk -I -n 3:0:-1M -c 3:"ZFS Root Partition" -t 3:bf01 "$DEV"
+            log sgdisk -a 1048576 -n 2:0:+512M -c 2:"EFI System Partition" -t 2:ef00 "$DEV" 
+            log sgdisk -a 1048576 -n 3:0:${end_position} -c 3:"ZFS Root Partition" -t 3:bf01 "$DEV"
             gum style "Partitioning successful"
             gum style ""
             xspin wipefs -a "$DEV"1
@@ -259,7 +268,7 @@ scan_parts() {
 create_pool() {
     gum style --bold "Choosing partition for new ZFS root pool"
     local zparts=
-    zparts=$(lsblk -o PATH,SIZE,TYPE,PARTTYPENAME,PARTTYPE -J | yq-go '.blockdevices.[] | select(.parttype=="6a898cc3-1dd2-11b2-99a6-080020736631") | .path')
+    zparts=$(lsblk -o PATH,SIZE,TYPE,PARTTYPENAME,PARTTYPE -J | yq '.blockdevices.[] | select(.parttype=="6a898cc3-1dd2-11b2-99a6-080020736631") | .path')
     if [[ -z "${zparts}" ]]; then
         echo "No suitable ZFS partitions found"
         exit 1
@@ -381,8 +390,8 @@ create_encrypted_dataset() {
     # of loading they key using 'zfs load-key -L prompt' to ask for the key even with a missing file for keylocation. 
     # This path will be used by quick_loadkey to temporarily store the key so that it can be loaded by the chainloaded 
     # kernel (i.e. proxmox, or another OS)
-    keydir=$(dirname "$1")
-    keyfile=$(basename "$1")
+    keydir=${1%/*}
+    keyfile=${1##/*}
     xspin zfs set "keylocation=file:///root/$keydir/$keyfile.key" "$1"
 }
 
@@ -453,6 +462,29 @@ be_has_encroot() {
   fi
 
   echo ""
+  return 1
+}
+
+be_is_locked() {
+  local fs keystatus encroot
+
+  fs="${1}"
+  if [ -z "${fs}" ]; then
+    echo "fs is undefined"
+    return 1
+  fi
+
+  if encroot="$( be_has_encroot "${fs}" )"; then
+    keystatus="$( zfs get -H -o value keystatus "${encroot}" )"
+    case "${keystatus}" in
+      unavailable)
+        return 0;
+        ;;
+      *)
+        ;;
+    esac
+  fi
+
   return 1
 }
 
@@ -632,6 +664,7 @@ mountLVM() {
         echo "Skipping LVM setup, lvm not part of this image"
     fi
 }
+
 convertLVM() {
     # first we need a temp root dataset, so pick or create one
     gum style "To convert a boot drive from LVM to ZFS, this script will: " \
@@ -693,9 +726,8 @@ convertLVM() {
         xspin lvm vgchange -an
     else
         gum style "1) First, select the temporary LVM dataset to be copied back to boot drive"
-        select_pool
-        tmppool="${POOLNAME}"
         choose_dataset .
+        tmppool="${POOLNAME}"
         set="${DATASET#*/}"
     fi
 
@@ -708,9 +740,15 @@ convertLVM() {
     recv=()
     send=()
     if encroot="$( be_has_encroot "${POOLNAME}/ROOT" )"; then
-        if confirm --affirmative="Inherit" --negative="Use existing" "${POOLNAME}/ROOT is encrypted. Do you want to inherit encryption or use existing?"; then
+        if confirm --affirmative="Inherit encryption from ${POOLNAME}/ROOT" --negative="Use existing encryption from ${tmppool}/${set}" "The target ${POOLNAME}/ROOT is encrypted. Do you want to inherit encryption or use existing?"; then
             recv+=(-o encryption=on "${STDOPTS[@]}")
             gum style "Dataset will inherit ${POOLNAME}/ROOT encryption"
+            if be_is_locked "${POOLNAME}/ROOT"; then
+                zfs load-key -L prompt "${encroot}"
+            fi
+            if encroot="$( be_has_encroot "${tmppool}/${set}" )" && be_is_locked "${tmppool}/${set}"; then
+                zfs load-key -L prompt "${encroot}"
+            fi
         else
             send+=(-cewp)
             gum style "Dataset will be copied with original encryption (raw)"
@@ -720,7 +758,14 @@ convertLVM() {
         gum style "Dataset will be copied with original encryption"
         send+=(-cewp)
     fi
-    xspin zfs snapshot -r "${tmppool}/${set}@snapshot"
+    
+    if ! zfs list "${tmppool}/${set}@snapshot" > /dev/null; then
+        gum style "Creating snapshot for transfer: ${tmppool}/${set}@snapshot"
+        xspin zfs snapshot -r "${tmppool}/${set}@snapshot"
+    else 
+        gum style "Using existing snapshot: ${tmppool}/${set}@snapshot"
+    fi
+
     size=$(zfs send -vnP ${send[@]} "${tmppool}/${set}@snapshot" | tail -n1 | awk '{print $NF}')
     log "zfs send ${send[@]} ${tmppool}/${set}@snapshot | pv -Wpbafte -s $size -i 1 | zfs receive ${recv[@]} ${POOLNAME}/ROOT/${set}"
     zfs send ${send[@]} "${tmppool}/${set}@snapshot" | pv -Wpbafte -s "$size" -i 1 | zfs receive ${recv[@]} "${POOLNAME}/ROOT/${set}"

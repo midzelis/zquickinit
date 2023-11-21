@@ -20,6 +20,7 @@ done
 
 
 : "${ZBM:=/zbm}"
+: "${KERNEL_CMDLINE:=zfsbootmenu ro loglevel=6 zbm.autosize=0}"
 
 DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
 SRC_ROOT=${DIR}
@@ -33,6 +34,7 @@ ZBM_TAG=
 ZBM_COMMIT_HASH=f23fc698c42220593a011cf6b58a0220452225f0
 INPUT=/input
 OUTPUT=/output
+ADD_LOADER=
 MKINIT_VERBOSE=
 KERNEL_BOOT=
 ENGINE=
@@ -234,7 +236,9 @@ make_zquick_initramfs() {
 	for dir in "${INPUT}"/recipes/*/initcpio; do
 		[[ ! -d $dir ]] && continue
 		hook_dirs+=("${dir#"/recipes"}")
-		recipes+=("$(basename "$(dirname "$dir")")")
+		name="${dir%s/*}"
+		name="${name##*/}"
+		recipes+=("${name}")
 	done
 	# zquick_core must always happen at the begining, so remove it and add it back later
 	# shellcheck disable=SC2206
@@ -251,7 +255,8 @@ make_zquick_initramfs() {
 		help=
 		for recipe in "${INPUT}"/recipes/*/recipe.yaml; do
 			[[ ! -r $recipe ]] && continue
-			name=$(basename "$(dirname "$recipe")")
+			name="${recipe%s/*}"
+			name="${name##*/}"
 			[[ $name == "zquick_core" ]] && continue
 			help+=" - \`$name\` - $($YG e '.help ' "$recipe")\n"
 		done
@@ -345,13 +350,17 @@ make_zquick_initramfs() {
 		COMPRESSION_OPTIONS=(-9 --long)
 		
 		zquickinit_root="$zquickinit"
+		zquickinit_config="$zquickinit"
+		if [[ -n "${SECRETS}" ]]; then
+			zquickinit_config="$zquickinit"/"${SECRETS}"
+		fi
 
 		function find_recipe { 
 			local i=\${1:-1} size=\${#BASH_SOURCE[@]}
 			for ((; i < size-1; i++)) ;do  
 				local file=\${BASH_SOURCE[\$i]:-}
 				if [[ \$file == $zquickinit/recipes/* ]]; then
-					echo \$(basename \$file)
+					echo \${file##*/}
 					break;
 			 	fi
 			done
@@ -359,8 +368,8 @@ make_zquick_initramfs() {
 
 		zquick_add_secret() {
 			if [[ $RELEASE = "1" ]]; then return 0; fi
-			local filename=\$(basename \$1)
-			local dirname=\$(dirname \$1)
+			local filename="\${1##*/}"
+			local dirname="\${1%/*}"
 			local file=
 			if [[ -n "${SECRETS}" ]]; then
 				[[ -f "${zquickinit}/${SECRETS}/\$filename" ]] && file="${zquickinit}/${SECRETS}/\$filename"
@@ -371,10 +380,10 @@ make_zquick_initramfs() {
 				done
 			fi
 			if [ ! -r "\$file" ]; then
-				warning "\$2 (\$filename) not found during build time"
+				msg2 "\$2 (\$filename) not found during build time"
 				return 1
 			else 
-				echo "adding \$2 (\$file) to image"
+				msg "adding \$2 (\$file) to image"
 				add_file "\$file" \$1
 			fi
 		}
@@ -426,7 +435,7 @@ make_zquick_initramfs() {
 		EOF
 	
 
-	echo "zfsbootmenu ro loglevel=6 zbm.autosize=0" > /tmp/cmdline
+	echo "${KERNEL_CMDLINE}" > /tmp/cmdline
 
 	cat > /tmp/os-release <<-EOF
 		NAME="ZFSQuickInit"
@@ -442,7 +451,8 @@ make_zquick_initramfs() {
 
 	output_img="${OUTPUT}/zquickinit-$build_time.img"
 	output_uki="${OUTPUT}/zquickinit-$build_time.efi"
-	kernel=$(basename "$(find "/lib/modules" -maxdepth 1 -type d| grep "/lib/modules/" | sort -V | tail -n 1)")
+	kernel="$(find "/lib/modules" -maxdepth 1 -type d| grep "/lib/modules/" | sort -V | tail -n 1)"
+	kernel="${kernel##/*}"
 
 	echo mkinitcpio --config /tmp/mkinitcpio.conf ${hookdirs[*]} \
 		--kernel "$kernel" "$MKINIT_VERBOSE" \
@@ -457,11 +467,12 @@ make_zquick_initramfs() {
 		--cmdline /tmp/cmdline \
 		--generate "$output_img" \
 		-U "$output_uki" 
-	cp "/boot/vmlinuz-$kernel" "${OUTPUT}/vmlinuz-$kernel"
+	cp "/boot/vmlinuz-$kernel" "${OUTPUT}/zquickinit-$build_time.vmlinuz-$kernel"
+	(cd "${OUTPUT}"; rm -rf vmlinuz; ln -s zquickinit-$build_time.vmlinuz-$kernel vmlinuz)
 	(cd "${OUTPUT}"; rm -rf zquickinit.efi; ln -s zquickinit-$build_time.efi zquickinit.efi)
 	chmod o+rw -R "${OUTPUT}"/*
 	chmod g+rw -R "${OUTPUT}"/*
-	env LC_ALL=en_US.UTF-8 printf "Kernel size: \t\t%'.0f bytes\n" "$(stat -c '%s' "${OUTPUT}/vmlinuz-$kernel")"
+	env LC_ALL=en_US.UTF-8 printf "Kernel size: \t\t%'.0f bytes\n" "$(stat -c '%s' "${OUTPUT}/zquickinit-$build_time.vmlinuz-$kernel")"
 	env LC_ALL=en_US.UTF-8 printf "initramfs size: \t%'.0f bytes\n" "$(stat -c '%s' "$output_img")"
 	env LC_ALL=en_US.UTF-8 printf "EFI size: \t\t%'.0f bytes\n" "$(stat -c '%s' "$output_uki")"
 	find "${OUTPUT}" -name 'zquickinit*.img' | sort -r | tail -n +4 | xargs -r rm
@@ -482,9 +493,9 @@ initramfs() {
 	cmd=("$ENGINE" run --rm)
 	((NOASK==0)) && cmd+=(-it)
 	
-	[[ -f "$SRC_ROOT/zquickinit.sh" ]] && cmd+=(-v "$SRC_ROOT/zquickinit.sh:/zquickinit.sh:ro") && echo "bind-mount: zquickinit.sh (readonly)"
-	[[ -d "$RECIPES_ROOT" ]] && cmd+=(-v "$SRC_ROOT:/input:ro") && echo "bind-mount: $RECIPES_ROOT to /input (readonly)"
-	[[ -d "$ZBM_ROOT" ]] && cmd+=(-v "$ZBM_ROOT:/zbm:ro" ) && echo "bind-mount: $(readlink -f "${ZBM_ROOT}") to /zbm (readonly)"
+	[[ -f "$SRC_ROOT/zquickinit.sh" ]] && cmd+=(-v "$SRC_ROOT/zquickinit.sh:/zquickinit.sh:ro") && echo "bind-mount: zquickinit.sh (read-only)"
+	[[ -d "$RECIPES_ROOT" ]] && cmd+=(-v "$SRC_ROOT:/input:rw") && echo "bind-mount: $RECIPES_ROOT to /input (read-write)"
+	[[ -d "$ZBM_ROOT" ]] && cmd+=(-v "$ZBM_ROOT:/zbm:ro" ) && echo "bind-mount: $(readlink -f "${ZBM_ROOT}") to /zbm (read-only)"
 
 	echo "bind-mount: $SRC_ROOT/output to /output (read-write)"
 	mkdir -p "$SRC_ROOT/output"
@@ -497,6 +508,7 @@ initramfs() {
 	((DEBUG==1)) && cmd+=(--debug)
 	((RELEASE==1)) && cmd+=(--release)
 	[[ -n "$SECRETS" ]] && cmd+=(--secrets "$SECRETS")
+	[[ -n "$MKINIT_VERBOSE" ]] && cmd+=("$MKINIT_VERBOSE")
 	echo
 	"${cmd[@]}"
 }
@@ -506,11 +518,11 @@ getefi() {
 	if [[ -r "$source" ]]; then
 		echo "Found EFI: ${source}"
 	else
-		source="${tmp}/zquickinit.efi"
 		echo "No image found, finding latest release..."
 		local version='' download=''
 		version=$(curl --silent -qI "${ZQUICKEFI_URL}" | awk -F '/' '/^location/ {print  substr($NF, 1, length($NF)-1)}')
 		download="https://github.com/midzelis/zquickinit/releases/download/$version/zquickinit.efi"
+		source="${tmp}/zquickinit-${version}.efi"
 		echo "Downloading from ${download} to ${source}..."
 		curl -o "$source" --progress-bar -L "${download}" 
 	fi
@@ -520,8 +532,8 @@ inject() {
 
 	inject_secret() {
 		local filename='' file='' dir=''
-		filename=$(basename "$1")
-		[[ -n "${INSTALLER_MODE:-}" ]] && dir=$(dirname "$1") || dir="."
+		filename="${1##/*}"
+		[[ -n "${INSTALLER_MODE:-}" ]] && dir="${1%/*}" || dir="."
 		# shellcheck disable=SC2154
 		for path in "$dir" "$1"; do
 			[[ -f "$path/$filename" ]] && file="$path/$filename" && break
@@ -538,10 +550,12 @@ inject() {
 		return 0
 	}
 
-	local target=${1:-zquickinit.efi}
-	local source=${2:-}
-	[[ -e "${target}" ]] && echo "${target} already exists." && exit 1
-
+	local source='' target=''
+	if [[ -n "${ADD_LOADER}" ]]; then
+		source=${1:-}
+	else
+		source=${2:-}
+	fi
 	# shellcheck disable=SC2155
 	local tmp=$(tmpdir)
 	
@@ -553,17 +567,31 @@ inject() {
 		getefi
 	fi
 	
+	if [[ -n "${ADD_LOADER}" ]]; then
+		target="${ADD_LOADER}"/EFI/"${source##*/}"
+	else
+		target=${1:-${source##*/}}
+	fi
+
+	[[ -e "${target}" ]] && echo "${target} already exists." && exit 1
+
+	version=
+	if [[ ${target} = *-* ]]; then
+		version=${target##*-}
+		version=${version%.*}
+	fi
+
 	local injected=0
-	[[ -z "${INSTALLER_MODE:-}" ]] && inject_secret "/zquick/etc/ttyd_pushover.conf"         "pushover ttyd config" && injected=1
-	[[ -z "${INSTALLER_MODE:-}" ]] && inject_secret "/etc/tailscale/tailscaled.conf"         "tailscale config" && injected=1
-	[[ -z "${INSTALLER_MODE:-}" ]] && inject_secret "/var/lib/tailscale/tailscaled.state"    "tailscale node identity" && injected=1
+	inject_secret "/zquick/etc/ttyd_pushover.conf"         "pushover ttyd config" && injected=1
+	inject_secret "/etc/tailscale/tailscaled.conf"         "tailscale config" && injected=1
+	inject_secret "/var/lib/tailscale/tailscaled.state"    "tailscale node identity" && injected=1
 	inject_secret "/root/.ssh/authorized_keys"             "sshd authorized_keys for root" && injected=1
-	[[ -z "${INSTALLER_MODE:-}" ]] && inject_secret "/etc/ssh/ssh_host_rsa_key"              "sshd host rsa key" && injected=1
-	[[ -z "${INSTALLER_MODE:-}" ]] && inject_secret "/etc/ssh/ssh_host_ecdsa_key"            "sshd host ecdsa key" && injected=1
-	[[ -z "${INSTALLER_MODE:-}" ]] && inject_secret "/etc/ssh/ssh_host_ed25519_key"          "sshd host ed25519 key" && injected=1
+	inject_secret "/etc/ssh/ssh_host_rsa_key"              "sshd host rsa key" && injected=1
+	inject_secret "/etc/ssh/ssh_host_ecdsa_key"            "sshd host ecdsa key" && injected=1
+	inject_secret "/etc/ssh/ssh_host_ed25519_key"          "sshd host ed25519 key" && injected=1
 
 	if ((injected==1)); then
-		check pax "pax or pax-utils"
+		check bsdtar "libarchive-tools"
 		check objcopy binutils
 		check truncate coreutils
 		check find findutils
@@ -580,12 +608,21 @@ inject() {
 		truncate -s "${initrd_size}" "${initrd}"
 
 		# shellcheck disable=SC2094
-		${FIND} "${tmp}" -not -path "${initrd}" -not -path "${source}" -print | \
-			pax -x sv4cpio -wd -s#"${tmp}"## | zstd >> "${initrd}"
+		# ${FIND} "${tmp}" -not -path "${initrd}" -not -path "${source}" -print | \
+		# 	pax -x sv4cpio -wd -s#"${tmp}"## | zstd >> "${initrd}"
 
-		echo "Copying new initramfs ${source} to EFI ${target}..."
+		set -x
+		# shellcheck disable=SC2094
+  		${FIND} "${tmp}" -not -path "${initrd}" -not -path "${source}" -print | \
+			bsdtar -P --format=newc -cf - --files-from - -s#"${tmp}"## | zstd >> "${initrd}"
+		set +x 
+		${FIND} "${tmp}" -not -path "${initrd}" -not -path "${source}" -print
+
+		echo "Copying original EFI ${source} to ${target}..."
 		cp "${source}" "${target}"
+		echo "Removing original initramfs section from EFI in ${target}..."
 		$OBJCOPY --remove-section .initrd "${target}"
+		echo "Adding new initramfs section from ${initrd} to ${target}..."
 		$OBJCOPY --add-section .initrd="${initrd}" --change-section-vma .initrd=0x3000000 "${target}"
 	else
 		echo "No secrets to inject."
@@ -593,6 +630,24 @@ inject() {
 		cp "${source}" "${target}"
 		echo "Created ${target}"
 	fi
+	if [[ -n "${ADD_LOADER}" ]]; then
+		btarget=${target##*/}
+		conf="${ADD_LOADER}"/loader/entries/zquickinit-"$version".conf
+		if [[ -e "$conf" ]]; then
+			echo "${conf} already exists." && exit 1
+		fi
+		mkdir -p "${ADD_LOADER}"/loader/entries
+		echo "title    zquickinit ($version)" > "$conf"
+		echo "options  ${KERNEL_CMDLINE}" >> "$conf"
+		echo "linux    /EFI/${btarget}" >> "$conf"
+		
+		timeout=3
+		sed -ir "/^timeout /{h;s/ .*\$/ ${timeout}/};\${x;/^$/{s//timeout ${timeout}/;H};x}" "${ADD_LOADER}/loader/loader.conf"
+		entry=${conf##*/}
+		sed -ir "/^default /{h;s/ .*\$/ ${entry}/};\${x;/^$/{s//default ${entry}/;H};x}" "$conf"
+	fi
+	
+
 	echo "Done"
 }
 
@@ -653,7 +708,7 @@ playground() {
 	local source='' kernel='' initrd='' iso='' tmpiso='' ovmf=''
 	echo "Searching for zquickinit kernel/initramfs pair" 
 	# shellcheck disable=SC2155
-	kernel=$(${FIND} . -type f -name 'vmlinuz*' -printf '%f\t%p\n' | sort -k1 | cut -d$'\t' -f2 | tail -n1)
+	kernel=$(${FIND} . -type f -name 'zquickinit*.vmlinuz*' -printf '%f\t%p\n' | sort -k1 | cut -d$'\t' -f2 | tail -n1)
 	# shellcheck disable=SC2155
 	initrd=$(${FIND} . -type f -name 'zquickinit*.img' -printf '%f\t%p\n' | sort -k1 | cut -d$'\t' -f2 | tail -n1)
 	if [[ -z "${kernel}" || -z "${initrd}" ]]; then 
@@ -678,7 +733,7 @@ playground() {
 	fi
 	if [[ -n "$iso" ]]; then
 		echo "Found iso: ${iso}"
-		tmpiso="${tmp}/$(basename "${iso}")"
+		tmpiso="${tmp}/${iso##*/}"
 		cp "${iso}" "${tmpiso}"
 	else
 		echo "Found kernel: ${kernel}"
@@ -783,14 +838,15 @@ playground() {
 			[ -n "${LINES}" ] && APPEND+=( "zbm.lines=${LINES}" )
 			[ -n "${COLUMNS}" ] && APPEND+=( "zbm.columns=${COLUMNS}" )
 			# shellcheck disable=SC2054
-			APPEND+=(console=ttyS0,115200n8 rd.debug rd.log=console);
+			APPEND+=(console=tty0 console=ttyS0,115200n8 zbm.autosize=0 loglevel=7);
 		fi
 	fi
 	if ((KERNEL_BOOT==1)); then
 		args+=(-kernel "$kernel")
 		args+=(-initrd "$initrd")
-		# args+=(-append "${APPEND[*]}")
+		args+=(-append "${APPEND[*]}")
 		args+=(-display vnc=0.0.0.0:0)
+		# args+=(-append "zbm.autosize=0 loglevel=7")
 	else
 		args+=(-display vnc=0.0.0.0:0)
 		echo "Not using serial console, VNC is running on 0.0.0.0:5900"
@@ -856,6 +912,12 @@ if [[ $(type -t "$command") == function ]]; then
 			;;
 			--no-container)
 				NOCONTAINER=1
+			;;
+			--add-loader)
+				if [[ -n ${2:-} ]]; then
+					ADD_LOADER=$2
+					shift
+				fi
 			;;
 			*)
 			ARGS+=("$1")

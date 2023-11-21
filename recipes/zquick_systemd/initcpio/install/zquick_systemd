@@ -61,6 +61,11 @@ add_systemd_drop_in() {
 build() {
     local rules unit
 
+    if [[ ! -x /usr/lib/systemd/systemd ]]; then
+        msg "Systemd not detected, system will use /init provided by mkinitcpio"
+        return 0
+    fi
+
     add_binary /usr/bin/kmod /usr/bin/modprobe
     add_binary /usr/bin/mount
     add_binary sulogin
@@ -135,22 +140,12 @@ build() {
     add_symlink "/usr/lib/systemd/system/default.target" "initrd.target"
     add_symlink "/usr/lib/systemd/system/ctrl-alt-del.target" "reboot.target"
 
-    printf '%s\n' >"$BUILDROOT/etc/nsswitch.conf" \
-         'passwd: files' \
-         'group: files' \
-         'shadow: files'
-
-    echo "root::0:0:root:/root:/bin/sh" >"$BUILDROOT/etc/passwd"
-    #echo 'root:*:::::::' >"$BUILDROOT/etc/shadow"
-    getent group root audio disk input kmem kvm lp optical render sgx storage tty uucp video | awk -F: ' { print $1 ":x:" $3 ":" }' >"$BUILDROOT/etc/group"
-
     add_dir "/etc/modules-load.d"
     (
       . "$_f_config"
       set -f
       printf '%s\n' ${MODULES[@]} >"$BUILDROOT/etc/modules-load.d/MODULES.conf"
     )
-
 
 	zquick_add_fs
 	add_symlink "/etc/systemd/system/initrd.target.wants/zquick.service" "/etc/systemd/system/zquick.service"

@@ -15,9 +15,6 @@ build() {
 	add_binary pv
 	add_binary find
 
-	add_binary perl
-	add_full_dir /usr/lib/perl5
-
 	add_binary mkfs.fat
 	add_binary fsck.fat
 	add_binary mkfs.ext4

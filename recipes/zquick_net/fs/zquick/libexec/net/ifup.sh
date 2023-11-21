@@ -1,5 +1,6 @@
 #!/bin/bash
-name=$(basename "$0")
+
+name="${0##*/}"
 log() {
    logger -p user.notice -t "${name}" "$1"
 }

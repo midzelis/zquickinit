@@ -6,4 +6,7 @@ xbps-packages:
  - htop
  - file
  - busybox-huge
+ - util-linux
+debian-packages:
+ - kbd
 help: "Required common dependencies to all recipes"

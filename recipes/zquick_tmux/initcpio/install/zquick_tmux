@@ -75,16 +75,20 @@ build() {
 	add_binary tmux
 	
 	# patch the pre-init
-	echo "Note: patching zfsbootmenu-preinit.sh to run within tmux"
+	msg "Note: patching zfsbootmenu-preinit.sh to run within tmux"
 	sed -i '/^exec/d' "${BUILDROOT}/lib/zfsbootmenu-preinit.sh"
 	cat >> "${BUILDROOT}/lib/start-tmux.sh" <<-'EOF'
 		#!/bin/bash
+		set -x
 		if [ ! -d /dev/pts ]; then
 			mkdir -p /dev/pts
 			mount -t devpts devpts /dev/pts
 		fi
 		function attach {
-			tmux -2 -u new-session -A -s ZFSBootMenu /libexec/zfsbootmenu-init
+			if ! tmux -2 -u new-session -A -s ZFSBootMenu /libexec/zfsbootmenu-init; then
+				echo "tmux exited badly"
+				exec /bin/bash
+			fi
 		}
 		# prevent badness if detaching tmux from real term
 		trap attach EXIT
@@ -93,8 +97,8 @@ build() {
 		done
 	EOF
 	chmod +x "${BUILDROOT}/lib/start-tmux.sh"
-	cat >> "${BUILDROOT}/lib/zfsbootmenu-preinit.sh" <<-'EOF'
-		exec /lib/start-tmux.sh
-		EOF
+	# cat >> "${BUILDROOT}/lib/zfsbootmenu-preinit.sh" <<-'EOF'
+	# 	exec /lib/start-tmux.sh
+	# 	EOF
 
 }

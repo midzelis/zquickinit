@@ -16,6 +16,8 @@ build() {
 	add_binary tailscale
 	add_binary iptables
 	add_binary ip6tables
+	add_binary pgrep
+	add_symlink "/usr/bin/pkill" "pgrep"
 	
 	add_full_dir /usr/share/ca-certificates
 	add_dir /etc/ssl/certs
@@ -27,6 +29,7 @@ build() {
 	add_symlink /etc/ssl/cert.pem /etc/ssl/certs/ca-certificates.crt
 
 	add_full_dir /usr/lib/xtables
+	add_full_dir /usr/lib/x86_64-linux-gnu/xtables
 	add_module tun
 	add_all_modules netfilter
 }

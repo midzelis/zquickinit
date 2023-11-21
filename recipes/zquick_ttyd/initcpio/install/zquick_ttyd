@@ -6,6 +6,7 @@ build() {
 	zquick_add_secret /zquick/etc/ttyd_pushover.conf "pushover ttyd config"
 
 	add_binary ttyd
+	add_binary pgrep
 	add_binary timeout
 
 	zquick_add_fs 

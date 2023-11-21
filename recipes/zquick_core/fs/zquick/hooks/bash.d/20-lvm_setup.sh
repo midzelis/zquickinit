@@ -1,13 +1,15 @@
 #!/bin/bash
 
-name=$(basename "$0")
 log() {
-   logger -p user.notice -t "${name}" "$1"
+   echo "$1"
 }
 
-if command -v lvm >/dev/null 2>&1; then
+[[ -f /zquick/run/lvm_setup ]] && exit 0
+touch /zquick/run/lvm_setup
 
-    log "Scanning for LVM"
+if command -v lvm >/dev/null 2>&1; then
+    log "Scanning for LVM volumes and auto-mounting..."
+    count=0
     modprobe dm_thin_pool
     lvm vgscan -v 2>/dev/null
     lvm vgchange -a y 2>/dev/null
@@ -31,7 +33,7 @@ if command -v lvm >/dev/null 2>&1; then
         # Mount the volume
         log "Mounting ${lv_path} on /mnt${volume}"
         mount "${lv_path}" "/mnt${volume}"
+        count=(count+1)
     done
-else
-    log "Skipping LVM setup, lvm not part of this image"
+    ((count==0)) && echo "No volumes found"
 fi

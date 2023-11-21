@@ -7,7 +7,7 @@ if [[ ! -r /var/lib/tailscale/tailscaled.state ]]; then
 fi
 
 start() {
-    dnsname=$(tailscale status --json | yq-go e '.Self.DNSName | .. |= sub("\.$", "")' -oy)
+    dnsname=$(tailscale status --json | yq e '.Self.DNSName | .. |= sub("\.$", "")' -oy)
     randompath=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1) || true
 
     PUSHOVER_APP_TOKEN=

@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/bin/sh
+# Note: no runtime hooks are run when using systemd
 
 run_earlyhook() {
     mkdir -p /var/log
@@ -8,5 +9,12 @@ run_earlyhook() {
 
     udevd --daemon --resolve-names=never
     udevd_running=1
+
+    echo "Triggering uevents..."
+    udevadm trigger --action=add --type=subsystems
+    udevadm trigger --action=add --type=devices
 }
 
+run_hook() {
+	exec /bin/bash /libexec/zfsbootmenu-initcpio
+}

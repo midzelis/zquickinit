@@ -1,10 +1,9 @@
 xbps-packages:
  - git
  - curl
- - perl
  - gummiboot
  - pv
- - pax
+ - libarchive-tools
  - findutils
  - rsync
  - util-linux

@@ -13,8 +13,8 @@ _zquickinit_loadkey() {
 
         key="${keylocation#file://}"
         key="${key#/}"
-        keydir=$(dirname "$key")
-        keyfile=$(basename "$key")
+        keydir=${key%/*}
+        keyfile=${key##/*}
 
         # this may be part of a re-run, check to see if we've already saved a copy of the response
         if [[ -e "/zquick/run/load_key/cache/$keydir/$keyfile" ]]; then
@@ -207,9 +207,14 @@ kexec_kernel() {
     truncate -s "${initrd_size}" "${temp_initrd}"
     initrd="${temp_initrd}"
 
+    # find /zquick/run/load_key/cache -print | \
+    #   pax -s#/zquick/run/load_key/cache## -x sv4cpio -wd | \
+    #   zstd >> "${initrd}"
+
     find /zquick/run/load_key/cache -print | \
-      pax -s#/zquick/run/load_key/cache## -x sv4cpio -wd | \
+      bsdtar -P --format=newc -cf - --files-from - -s#/zquick/run/load_key/cache## | \
       zstd >> "${initrd}"
+    
   fi
 
   if ! output="$( kexec -a -l "${mnt}${kernel}" \

@@ -25,12 +25,21 @@ build() {
     done
 
     # udev rules and lvm configuration
-    add_file "/usr/lib/udev/rules.d/10-dm.rules"
-    add_file "/usr/lib/udev/rules.d/11-dm-lvm.rules"
-    add_file "/usr/lib/udev/rules.d/13-dm-disk.rules"
+    # the first is in arch/void, the 2nd is in debian-based
+    [[ -e /usr/lib/udev/rules.d/10-dm.rules ]] && add_file /usr/lib/udev/rules.d/10-dm.rules
+    [[ -e /usr/lib/udev/rules.d/55-dm.rules ]] && add_file /usr/lib/udev/rules.d/55-dm.rules
+
+    [[ -e /usr/lib/udev/rules.d/11-dm-lvm.rules ]] && add_file /usr/lib/udev/rules.d/11-dm-lvm.rules
+    [[ -e /usr/lib/udev/rules.d/56-lvm.rules ]] && add_file /usr/lib/udev/rules.d/56-lvm.rules
+
+    [[ -e /usr/lib/udev/rules.d/13-dm-disk.rules ]] && add_file /usr/lib/udev/rules.d/13-dm-disk.rules
+    [[ -e /usr/lib/udev/rules.d/60-persistent-storage-dm.rules ]] && add_file /usr/lib/udev/rules.d/60-persistent-storage-dm.rules
+
     add_file "/usr/lib/udev/rules.d/95-dm-notify.rules"
-    add_file "/usr/lib/initcpio/udev/11-dm-initramfs.rules" "/usr/lib/udev/rules.d/11-dm-initramfs.rules"
-    add_file "/usr/lib/initcpio/udev/69-dm-lvm-metad.rules" "/usr/lib/udev/rules.d/69-dm-lvm-metad.rules"
+
+    [[ -e /usr/lib/initcpio/udev/11-dm-initramfs.rules ]] && add_file /usr/lib/initcpio/udev/11-dm-initramfs.rules
+    [[ -e /usr/lib/initcpio/udev/69-dm-lvm-metad.rules ]] && add_file /usr/lib/initcpio/udev/69-dm-lvm-metad.rules
+
     add_file "/etc/lvm/lvm.conf"
 
 }

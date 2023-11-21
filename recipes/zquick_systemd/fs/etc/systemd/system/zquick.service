@@ -1,12 +1,12 @@
 [Unit]
 Description=zquick
-After=initrd.target systemd-udev-settle.service
+After=initrd.target systemd-udev-trigger.service
 OnFailure=emergency.target
 OnFailureJobMode=replace-irreversibly
 AssertPathExists=/etc/initrd-release
 Conflicts=initrd-parse-etc.service
 ConditionPathExists=/etc
-Wants=initrd.target systemd-udev-settle.service 
+Wants=initrd.target
 
 [Service]
 Type=idle

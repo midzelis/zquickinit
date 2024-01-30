@@ -1,3 +1,55 @@
-#!/bin/sh
+#!/bin/bash
 
-exec /lib/start-tmux.sh
+# Always execute login (Which sets the HOME directory to the value in /etc/passwd). 
+#
+# login will launch the shell (bash) which will 
+# auto-launch zfsbootmenu which requires access to the terminal, so it
+# will be delayed until after login. If there is no root password, login will 
+# automatically login as root user. 
+#
+# When using tmux support, tmux will automatically start zfsbootmenu
+# on a virtual terminal and login will attach to that virtual terminal. 
+# see recipes/zquick_tmux/fs/zquick/init for more info. 
+
+#tput clear
+cat <<EOF
+                                                                                         
+ _|_|_|_|_|                      _|            _|        _|_|_|            _|    _|      
+       _|      _|_|_|  _|    _|        _|_|_|  _|  _|      _|    _|_|_|        _|_|_|_|  
+     _|      _|    _|  _|    _|  _|  _|        _|_|        _|    _|    _|  _|    _|      
+   _|        _|    _|  _|    _|  _|  _|        _|  _|      _|    _|    _|  _|    _|      
+ _|_|_|_|_|    _|_|_|    _|_|_|  _|    _|_|_|  _|    _|  _|_|_|  _|    _|  _|      _|_|  
+                   _|                                                                    
+                   _|                                                                    
+
+
+EOF
+
+t=$(tty)
+if [[ $t == '/dev/tty1' ]]; then
+    bash -i -l 2>&1 | tee /dev/ttyS0
+fi
+if [[ $t == '/dev/ttyS0' ]]; then
+    bash -i -l 2>&1 | tee /dev/tty1
+fi
+
+
+source /etc/zfsbootmenu.conf
+echo The controlling terminal is ${control_term}
+echo This terminal is $(tty)
+echo
+
+read -n 1 -s -r -p "Press any key to login"
+echo
+exec login
+
+# sleep 10
+# clear
+# passwd=$(sed -r '/root/{s/[^:]*:([^:]*).*/\1/;t};d' /etc/passwd)
+# if (( ${#passwd} >= 2 )); then
+#     exec login
+# else
+#     sleep 10
+#     export HOME=/root
+#     exec /libexec/zfsbootmenu-init
+# fi

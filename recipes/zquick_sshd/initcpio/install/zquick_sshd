@@ -4,7 +4,6 @@ build() {
 	zquick_add_fs
 	
 	add_binary sshd
-	add_binary ssh-keygen
 	
 	zquick_add_secret /root/.ssh/authorized_keys 	"sshd authorized_keys for root"
 
@@ -15,28 +14,14 @@ build() {
 	zquick_add_secret /etc/ssh/sshd_config 			"sshd configuration"
 
 	if [[ ! -e "${BUILDROOT}/etc/ssh/ssh_host_rsa_key" && ! -e "${BUILDROOT}/etc/ssh/ssh_host_ecdsa_key" && ! -e "${BUILDROOT}/etc/ssh/ssh_host_ed25519_key" ]]; then
-		msg2 "No host keys specified, generating new host keys and saving in ${zquickinit_config}"
-		ssh-keygen -A
-		add_file /etc/ssh/ssh_host_rsa_key
-		add_file /etc/ssh/ssh_host_ecdsa_key
-		add_file /etc/ssh/ssh_host_ed25519_key
-		cp "${BUILDROOT}"/etc/ssh/* "${zquickinit_config}"
+		msg2 "No host keys specified, autogenerating new keys for this build. Keys will be not be saved to zquickinit configuration area."
+		ssh-keygen -A -f "${BUILDROOT}"
 	fi
 
 	if [[ ! -e "${BUILDROOT}/etc/ssh/sshd_config" ]]; then
-		msg2 "No sshd_config specified, generating sshd_config that allows root login on port 22"
-		mkdir -p "${BUILDROOT}/etc/ssh"
-		cat <<-EOF > "${BUILDROOT}/etc/ssh/sshd_config"
-			Port 22
-			PermitRootLogin yes
-			IgnoreUserKnownHosts yes
-			MaxAuthTries 10
-			EOF
-		cp "${BUILDROOT}/etc/ssh/sshd_config" "${zquickinit_config}"
+		msg2 "sshd_config not found, sshd will likely not run until this file is present. (Can be injected into image later)"
+	elif [[ ! -e "${BUILDROOT}/root/.ssh/authorized_keys" ]]; then
+		msg2 "/root/.ssh/authorized_keys not found."
 	fi
 
-	if [[ ! -e "${BUILDROOT}/root/.ssh/authorized_keys" && ! -e "${BUILDROOT}/root/.ssh/sshd_config" ]]; then
-		msg2 "SSHd configuration incomplete (at build time): SSHd will not start until"
-		msg2 "/etc/ssh/sshd_config and /root/.ssh/authorized_keys are present in the initramfs image."
-	fi
 }

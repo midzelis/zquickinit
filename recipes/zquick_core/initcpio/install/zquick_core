@@ -1,12 +1,36 @@
 #!/bin/bash
 
+add_terminfo() {
+	terms="l/linux v/vt100 v/vt102 v/vt220 x/xterm x/xterm-color x/xterm-256color"
+    # Find the first path that contains a linux terminfo
+    for search in /etc /lib /usr/share; do
+		for term in $terms; do
+        	[[ -r "${search}/terminfo/${term}" ]] || continue
+			add_file "${search}/terminfo/${term}" "/usr/share/terminfo/${term}"
+		done
+    done
+}
+
 build() {
 	zquick_add_fs
 
-	add_binary login
+	zquick_add_secret /etc/zquickinit.conf "zquick init"
+
+	add_terminfo
+
+	if ! "${BUILDROOT}/bin/busybox" --list | grep login >/dev/null; then
+		add_binary login
+		cat >> "${BUILDROOT}/etc/login.defs" <<-'EOF'
+			LOGIN_TIMEOUT=0
+		EOF
+	fi
 	add_binary clear
 	add_binary reset
+	add_binary script
 	add_binary strace
+	add_binary loadkeys
+	add_binary lspci
+	add_binary lshw
 	if which yq-go >/dev/null; then
 		add_binary yq-go /bin/yq
 	else
@@ -27,6 +51,8 @@ build() {
 		alias ls='ls --color=auto' 
 		alias grep='grep --colour=auto'
 		/zquick/libexec/run_hooks.sh bash.d
+		gum format -t template -- "{{ Foreground \"#ff9770\" \"'zbm'\"}} will launch ZFSBootmenu" ""
+		gum format -t template -- "{{ Foreground \"#ff9770\" \"'zquickinit.sh'\"}} allows you to rebuild/update this initramfs env" "" 
 		EOF
 
 	printf '%s\n' >"$BUILDROOT/etc/nsswitch.conf" \
@@ -34,12 +60,22 @@ build() {
          'group: files' \
          'shadow: files'
 
-    echo "root::0:0:root:/root:/bin/bash" >"$BUILDROOT/etc/passwd"
+  
+	encrypted=
+	if [[ -f "${zquickinit_config}/etc/zquickinit.conf" ]]; then
+		root_password=$(sed -rn '/^root_password=/s/.*=(.*)/\1/p' "${zquickinit_config}/etc/zquickinit.conf")
+		if [[ -n "$root_password" ]]; then
+			msg2 "root password is configured"
+			encrypted=$(echo "$root_password" | openssl passwd -6 -stdin)
+		else
+			warning "CAUTION! There is not root password set!!! zfsbootmenu will start automatically on all consoles. For more security, set variable \"root_password=\" in ${zquickinit_config}/etc/zquickinit.conf"
+		fi
+	fi
+
+  	echo "root:${encrypted}:0:0:root:/root:/bin/bash" >"$BUILDROOT/etc/passwd"
 	echo "sshd:*:91:91::/run/sshd:/bin/false" >>"$BUILDROOT/etc/passwd"
 	echo "nobody:*:99:99::/dev/null:/bin/false" >>"$BUILDROOT/etc/passwd"
-	echo "root:root" | chpasswd -c SHA256 -R "$BUILDROOT"
-	cat "$BUILDROOT/etc/shadow"
-	cat "$BUILDROOT/etc/passwd"
+	
     getent group root audio disk input kmem kvm lp optical render sgx storage tty uucp video | awk -F: ' { print $1 ":x:" $3 ":" }' >"$BUILDROOT/etc/group"
 
 	libpaths=(/lib /usr/lib /lib64 /usr/lib64)
@@ -53,33 +89,45 @@ build() {
 	for llib in "${libs[@]}"; do
 		for ldir in "${libpaths[@]}"; do
 			lib=${ldir}/${llib}
-			[[ -e ${lib} ]] && echo  "${lib}" && add_binary "${lib}" && break
+			[[ -e ${lib} ]] && add_binary "${lib}" && break
 		done
 	done
 
-	# create wrapper for zfsbootmenu entry point
-	rm "${BUILDROOT}/hooks/zfsbootmenu"
- 	touch "${BUILDROOT}/libexec/zfsbootmenu"
-
 	# UDEV stuff
-	if [[ ! -x /usr/lib/systemd/systemd ]]; then
+	use_systemd=$(sed -rn '/^use_systemd=/s/.*=(.*)/\1/p' "${zquickinit_config}/etc/zquickinit.conf")
+	if [[ "${use_systemd}" = "yes" ]]; then
+		echo "use systemd"
+	else
+		if [[ ! -f /usr/bin/udevd ]]; then
+			add_binary ${zquickinit_root}/recipes/zquick_core/extra/udevd /usr/bin/udevd
+		else
+			add_binary /usr/bin/udevd
+		fi
+		if [[ ! -f /usr/bin/udevadm ]]; then
+			add_binary ${zquickinit_root}/recipes/zquick_core/extra/udevadm /usr/bin/udevadm
+		else
+			add_binary /usr/bin/udevadm
+		fi
 		add_file "/etc/udev/udev.conf"
-		add_binary /usr/bin/udevd
-		add_binary /usr/bin/udevadm
+		search=('/etc/systemd/hwdb/', '/etc/udev/', '/usr/lib/systemd/hwdb', )
+
+		found=
+		for f in {/etc,/lib}{/systemd/hwdb,/udev} /usr/lib/systemd/hwdb; do
+			[[ -f "${f}/hwdb.bin" ]] && add_file "${f}/hwdb.bin" && found=1 && break
+		done
+		[[ -z "${found}" ]] && add_file ${zquickinit_root}/recipes/zquick_core/extra/hwdb.bin /etc/udev/hwdb.bin
 
 		map add_udev_rule \
 			'50-udev-default.rules' \
 			'60-persistent-storage.rules' \
 			'64-btrfs.rules' \
 			'80-drivers.rules'
-    
-    	map add_file \
+	
+		map add_file \
 			'/usr/lib/udev/ata_id' \
 			'/usr/lib/udev/scsi_id'
-
-
-		add_runscript
 	fi
+
 	# end UDEV
 
 }

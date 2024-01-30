@@ -1,10 +1,8 @@
 #!/bin/bash
 
-name=$(basename "$0")
-log() {
-   logger -p user.notice -t "${name}" "$1"
-}
+# shellcheck disable=SC1091
+. /zquick/libexec/utils.sh
 
-log "Tailscale - Closing SSH sessions"
+qloginit "Tailscale - Closing SSH sessions"
 pkill -HUP sshd
 pkill -HUP login

@@ -15,6 +15,14 @@ help_text=$(cat <<-EOF
 	EOF
 	)
 gum format "${help_text}" " "
-name=$(input --value zquickinit --placeholder hostname)
-[[ -n $name ]] && echo "$name" > /etc/hostname ||  echo "zquickinit" > /etc/hostname
+value=
+set +e
+[[ -f "${zquickinit_config}/etc/hostname" ]] && read -r value < "${zquickinit_config}/etc/hostname"
+set -e
+name=$(input --value zquickinit --placeholder hostname --value "${value}")
+if [[ -n $name ]]; then
+	echo "$name" > "${zquickinit_config}/etc/hostname"
+else
+	echo "zquickinit" > "${zquickinit_config}/hostname"
+fi
 

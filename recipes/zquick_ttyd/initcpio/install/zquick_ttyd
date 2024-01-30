@@ -1,9 +1,6 @@
 #!/bin/bash
 
-
-
 build() {
-	zquick_add_secret /zquick/etc/ttyd_pushover.conf "pushover ttyd config"
 
 	add_binary ttyd
 	add_binary pgrep

@@ -225,7 +225,7 @@ partition_drive() {
         gum style --bold "CAUTION!!! ALL DATA WILL BE ERASED"
         if confirm --default=no "Proceed with partitioning $DEV?"; then
             log umount "$DEV"?*
-            umount "$DEV"?* >/dev/null 2>&1 || true
+            umount "$DEV"?* >/dev/null 2>&1 || :
             gum spin --spinner=points --title="Clearing partition" -- sgdisk -og "$DEV" > /dev/null
             gum spin --spinner=points --title="Creating BIOS Boot Partition" -- sgdisk -n 1:2048:+1M -c 1:"BIOS Boot Partition" -t 1:ef02 "$DEV" > /dev/null
             gum spin --spinner=points --title="Creating EFI System Partition" -- sgdisk -a 1048576 -n 2:0:+512M -c 2:"EFI System Partition" -t 2:ef00 "$DEV" > /dev/null
@@ -256,12 +256,12 @@ partition_drive() {
 
 scan_parts() {
     log kpartx -u "$1" 
-    kpartx -u "$1" || true
+    kpartx -u "$1" || :
     # dmsetup will try to map these drives, so remove them
     if command -v dmsetup >/dev/null 2>&1; then
         dev=/$(echo "$1" | cut -d/ -f3-)
         log dmsetup remove /dev/mapper/"${dev}"*
-        dmsetup remove /dev/mapper/"${dev}"*  >/dev/null 2>&1 || true
+        dmsetup remove /dev/mapper/"${dev}"*  >/dev/null 2>&1 || :
     fi
 }
 
@@ -321,7 +321,7 @@ create_pool() {
         fi
         if confirm "Perform zpool initialize? This may take a long time. "; then
             log "Initializing zpool..."
-            xspin zpool initialize -w "${POOLNAME}" || true
+            xspin zpool initialize -w "${POOLNAME}" || :
         fi
     else
         exit 1
@@ -775,15 +775,15 @@ convertLVM() {
     devs=$(lsblk --nodeps -n -o path)
     for dev in ${devs}; do
         log kpartx -u "$dev" 
-        kpartx -u "$dev" || true
+        kpartx -u "$dev" || :
     done
-    xspin zpool import -a || true
+    xspin zpool import -a || :
     for dev in ${devs}; do
         # dmsetup will try to map these drives, so remove them
         if command -v dmsetup >/dev/null 2>&1; then
             dev=/$(echo "$dev" | cut -d/ -f3-)
             log dmsetup remove /dev/mapper/"${dev}"*
-            dmsetup remove /dev/mapper/"${dev}"* >/dev/null 2>&1 || true
+            dmsetup remove /dev/mapper/"${dev}"* >/dev/null 2>&1 || :
         fi
     done
     gum style "Finished! Manually remove ${tmppool}/${set} and ${tmppool}/${set}@snapshot after you verified successful boot."
@@ -797,7 +797,7 @@ choices=("Install Proxmox 8.x"
     "Encrypt existing dataset" 
     "Convert LVM root to ZFS root dataset"
     # "Rollback to pre install and run install" 
-    "Exit to shell")
+    "Exit")
 
 choice=$(choose "${choices[@]}")
 if [[ "$choice" =~ ^Install.* ]]; then
@@ -808,7 +808,7 @@ if [[ "$choice" =~ ^Install.* ]]; then
 fi
 if [[ "$choice" =~ ^Chroot.* ]]; then
     gum style "* Chroot"
-    zpool import -a || true
+    zpool import -a || :
     select_pool
     choose_dataset
     import_tmproot_pool_dataset
@@ -816,7 +816,7 @@ if [[ "$choice" =~ ^Chroot.* ]]; then
 fi
 if [[ "$choice" =~ ^Encrypt.* ]]; then
     gum style "* Encrypt Existing Dataset"
-    zpool import -a || true
+    zpool import -a || :
     select_pool
     zpool_export "${POOLNAME}"
     zpool import "$POOLNAME"
@@ -825,7 +825,7 @@ fi
 if [[ "$choice" =~ ^Convert.* ]]; then
     gum style "* Convert LVM root"
     zpool_export -a
-    zpool import -a || true
+    zpool import -a || :
     convertLVM
 fi
 if [[ "$choice" =~ ^Rollback.* ]]; then  

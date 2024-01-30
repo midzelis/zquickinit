@@ -7,7 +7,7 @@ Dockerfile
 output
 *.qcow2
 hostname
-ttyd_pushover.conf
+zquickinit.conf
 tailscaled.state*
 *.efi
 *.iso

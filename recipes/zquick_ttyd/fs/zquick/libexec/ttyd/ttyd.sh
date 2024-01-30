@@ -2,24 +2,24 @@
 
 set -euo pipefail
 
-if [[ ! -r /var/lib/tailscale/tailscaled.state ]]; then 
+if [[ ! -r /var/lib/tailscale/tailscaled.state || ! -r /etc/zquickinit.conf ]]; then 
 	exit 0
 fi
 
 start() {
-    dnsname=$(tailscale status --json | yq e '.Self.DNSName | .. |= sub("\.$", "")' -oy)
-    randompath=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1) || true
+    ts_status=$(tailscale status --json)
+    [[ -z ${ts_status} ]] && exit 1
+    dnsname=$(echo "${ts_status}" | yq e '.Self.DNSName | .. |= sub("\.$", "")' -oy || :)
+    [[ -z ${dnsname} ]] && exit 1
 
-    PUSHOVER_APP_TOKEN=
-    PUSHOVER_USER_KEY=
-    if [ -r /zquick/etc/ttyd_pushover.conf ]; then
-        source /zquick/etc/ttyd_pushover.conf
-    fi
+    randompath=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1) || :
 
     url="https://${dnsname}/$randompath"
 
-    if [ -n "${PUSHOVER_APP_TOKEN}" ] && [ -n "${PUSHOVER_USER_KEY}" ]; then
+    PUSHOVER_APP_TOKEN=$(sed -rn '/^PUSHOVER_APP_TOKEN=/s/.*=(.*)/\1/p' "/etc/zquickinit.conf")
+    PUSHOVER_USER_KEY=$(sed -rn '/^PUSHOVER_USER_KEY=/s/.*=(.*)/\1/p' "/etc/zquickinit.conf")
 
+    if [ -n "${PUSHOVER_APP_TOKEN}" ] && [ -n "${PUSHOVER_USER_KEY}" ]; then
         curl -s \
             --form-string "token=$PUSHOVER_APP_TOKEN" \
             --form-string "user=$PUSHOVER_USER_KEY" \

@@ -9,7 +9,7 @@ cols="$( tput cols 2>/dev/null )"
 cols=$((cols-5))
 out=$(gum write --width="$cols" --placeholder="tailscale state")
 if [[ -n $out ]]; then
-	mkdir -p /var/lib/tailscale
-	echo "$out" > /var/lib/tailscale/tailscaled.state
+	mkdir -p "${zquickinit_config}/var/lib/tailscale"
+	echo "$out" > "${zquickinit_config}/var/lib/tailscale/tailscaled.state"
 fi
 

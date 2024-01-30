@@ -20,7 +20,8 @@ done
 
 
 : "${ZBM:=/zbm}"
-: "${KERNEL_CMDLINE:=zfsbootmenu ro loglevel=6 zbm.autosize=0}"
+: "${KERNEL_CMDLINE:=zfsbootmenu ro loglevel=4 zbm.autosize=0}"
+: "${INSTALLER_MODE:=$( [ -e /etc/zquickinit ] && echo "1" || echo "0" )}"
 
 DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
 SRC_ROOT=${DIR}
@@ -48,7 +49,7 @@ RELEASE=0
 GITHUBACTION=0
 SSHONLY=
 NOQEMU=
-SECRETS=
+SECRETS=config
 DRIVE1=1
 DRIVE1_GB=8
 DRIVE2=0
@@ -107,7 +108,7 @@ check() {
 	fi
 	if [[ $1 == objcopy && -z "${OBJCOPY}" ]]; then
 		if [[ "$OSTYPE" == "darwin"* ]]; then
-			OBJCOPY=$(find /opt/homebrew /usr/local -name gobjcopy -print -quit 2>/dev/null || true)
+			OBJCOPY=$(find /opt/homebrew /usr/local -name gobjcopy -print -quit 2>/dev/null || :)
 			if [[ -z ${OBJCOPY} ]]; then
 				echo "$1 not found. usually part of the $2 package"
 				echo "On MacOS, use brew to install binutils"
@@ -213,7 +214,7 @@ make_zquick_initramfs() {
 			(cd "${INPUT}" && git fetch --depth 1 origin "$hash" && git checkout FETCH_HEAD)
 		fi
 	fi
-	(cd "${INPUT}" && git config --global --add safe.directory "${INPUT}" && git rev-parse HEAD > /etc/zquickinit-commit-hash && echo "ZQuickInit (https://github.com/midzelis/zquickinit) commit hash: $(git rev-parse --short HEAD) ($(git rev-parse HEAD))")
+	[[ -x /etc/zquickinit-commit-hash ]] && (cd "${INPUT}" && git config --global --add safe.directory "${INPUT}" && /etc/zquickinit-commit-hash && git rev-parse HEAD > /etc/zquickinit-commit-hash && echo "ZQuickInit (https://github.com/midzelis/zquickinit) commit hash: $(git rev-parse --short HEAD) ($(git rev-parse HEAD))")
 
 	if [[ ! -d "${ZBM}" ]]; then
 		echo "Downloading latest zfsbootmenu"
@@ -225,18 +226,16 @@ make_zquick_initramfs() {
 		fi
 	fi
 
-	(cd "${ZBM}" && git config --global --add safe.directory "${ZBM}" && git rev-parse HEAD > /etc/zbm-commit-hash && echo "ZBM (https://github.com/zbm-dev/zfsbootmenu) commit hash: $(git rev-parse --short HEAD) ($(git rev-parse HEAD))")
+	[[ -x /etc/zquickinit-commit-hash ]] && (cd "${ZBM}" && git config --global --add safe.directory "${ZBM}" && git rev-parse HEAD > /etc/zbm-commit-hash && echo "ZBM (https://github.com/zbm-dev/zfsbootmenu) commit hash: $(git rev-parse --short HEAD) ($(git rev-parse HEAD))")
 
-	hooks=()
 	hook_dirs=()
-
-	system_hooks=(autodetect base modconf block filesystems keyboard strip)
+	system_hooks=(strip autodetect base modconf block filesystems keyboard)
 
 	recipes=()
 	for dir in "${INPUT}"/recipes/*/initcpio; do
 		[[ ! -d $dir ]] && continue
 		hook_dirs+=("${dir#"/recipes"}")
-		name="${dir%s/*}"
+		name="${dir%/*}"
 		name="${name##*/}"
 		recipes+=("${name}")
 	done
@@ -248,21 +247,35 @@ make_zquick_initramfs() {
 	# shellcheck disable=SC2206
 	recipes=( ${recipes[@]/zquick_end} )
 	
-	strip_sel=
+	zquickinit="${INPUT}"
+	zquickinit_config="${zquickinit}"
+	if [[ -n "${SECRETS}" ]]; then
+		zquickinit_config="${zquickinit}"/"${SECRETS}"
+		mkdir -p "${zquickinit_config}"
+	fi
+	enabled_recipes=
+	enabled_systemhooks=
+	if [[ -f "${zquickinit_config}/etc/zquickinit.conf" ]]; then
+		enabled_recipes=$(sed -rn '/^enabled_recipes=/s/.*=(.*)/\1/p' "${zquickinit_config}/etc/zquickinit.conf")
+		enabled_systemhooks=$(sed -rn '/^enabled_systemhooks=/s/.*=(.*)/\1/p' "${zquickinit_config}/etc/zquickinit.conf")
+	else
+		enabled_recipes=$(IFS=, ; echo "${recipes[*]}")
+		enabled_systemhooks=$(IFS=, ; echo "${system_hooks[*]}")
+	fi
+
+	move_strip=
 	if ((NOASK==0)); then 
 		check yq
 
 		help=
 		for recipe in "${INPUT}"/recipes/*/recipe.yaml; do
 			[[ ! -r $recipe ]] && continue
-			name="${recipe%s/*}"
+			name="${recipe%/*}"
 			name="${name##*/}"
 			[[ $name == "zquick_core" ]] && continue
 			help+=" - \`$name\` - $($YG e '.help ' "$recipe")\n"
 		done
 
-		read -r -a sorted <<< "$(sort <<<"${recipes[*]}")"
-		
 		gum style --bold --border double --align center \
                 --width 50 --margin "1 2" --padding "0 2" "Welcome to zquickinit" "(interactive mode)"
 
@@ -272,17 +285,13 @@ make_zquick_initramfs() {
 			<br>
 			EOF
 			)
-		# echo -n "${help_text}"
 		gum format "${help_text}" " "
-		selected=$(IFS=, ; echo "${sorted[*]}")
-		selected=("${selected[@]}")
-		((RELEASE==1)) && selected=("${selected[@]/zquick_qemu}")
 
 		# shellcheck disable=SC2207,SC2048,SC2086
-		recipes=($(gum choose --height=20 --no-limit --selected="${selected[*]}" ${sorted[*]}))
-		
+		chosen_recipes=($(gum choose --height=20 --no-limit --selected="${enabled_recipes}" ${recipes[*]}))
+
 		cont_warn=''
-		((NOCONTAINER==0)) && cont_warn="Note: autodetect won't work as expected when running within a container."
+		((NOCONTAINER==0)) && cont_warn="Note: mkcpio hook 'autodetect' won't work as expected when running within a container."
 		help_text=$(cat <<-EOF
 			# Which mkcpio system hooks would you like to include?
 			See https://wiki.archlinux.org/title/mkinitcpio#Common_hooks for more info. 
@@ -292,56 +301,82 @@ make_zquick_initramfs() {
 			)
 		gum format "${help_text}" " "
 
-		sorted=("$(sort <<<"${system_hooks[*]}")")
-		# shellcheck disable=SC2206
-		sorted=( ${sorted[@]} )
-		selected=$(IFS=, ; echo "${sorted[*]}")
-		((NOCONTAINER==0)) && selected=("${selected[@]/autodetect}")
 		# shellcheck disable=SC2207,SC2048,SC2086
-		system_hooks=($(gum choose ${sorted[*]} --no-limit --selected="${selected[*]}"))
+		chosen_systemhooks=($(gum choose --no-limit --selected="${enabled_systemhooks}" ${system_hooks[*]}))
 
-		# do some re-ordering
-		if [[ ${system_hooks[@]} =~ strip ]]; then
-			strip_sel=1
-		fi
+		mkdir -p "${zquickinit_config}/etc"
+		touch "${zquickinit_config}/etc/zquickinit.conf"
+		entry="enabled_systemhooks=$(IFS=, ; echo "${chosen_systemhooks[*]}")"
+		sed -i -r "/^enabled_systemhooks/{h;s/.*\$/${entry}/};\${x;/^$/{s//${entry}/;H};x}" "${zquickinit_config}/etc/zquickinit.conf"
+		entry="enabled_recipes=$(IFS=, ; echo "${chosen_recipes[*]}")"
+		sed -i -r "/^enabled_recipes/{h;s/.*\$/${entry}/};\${x;/^$/{s//${entry}/;H};x}" "${zquickinit_config}/etc/zquickinit.conf"
 
-		for recipe in "${recipes[@]}"; do
+		# run zquick_core setup explicitly, since its hidden from recipe list
+		env zquickinit_config="${zquickinit_config}" "${INPUT}/recipes/zquick_core/setup.sh"
+
+		for recipe in "${chosen_recipes[@]}"; do
 			[[ ! -x "${INPUT}"/recipes/${recipe}/setup.sh ]] && continue
-			"${INPUT}recipes/${recipe}/setup.sh"
+			env zquickinit_config="${zquickinit_config}" "${INPUT}/recipes/${recipe}/setup.sh"
 		done
+	else 
+		IFS=',' read -r -a chosen_recipes <<< "${enabled_recipes}"
+		IFS=',' read -r -a chosen_systemhooks <<< "${enabled_systemhooks}"
 
-	else
-		system_hooks=("${system_hooks[@]/autodetect}")
-		((RELEASE==1)) && recipes=("${recipes[@]/zquick_qemu}")
-		((RELEASE==1)) && strip_sel=1 || system_hooks=("${system_hooks[@]/strip}")
-		echo "zquickinit" > /etc/hostname
+		echo "Enabled System Hooks: $(IFS=, ; echo "${chosen_systemhooks[*]}")" 
+		echo "Enabled Recipes: $(IFS=, ; echo "${chosen_recipes[*]}")" 
+		echo
+
+		if ((NOCONTAINER==0)); then
+			echo "Removing autodetect hook"
+			echo
+			chosen_systemhooks=("${chosen_systemhooks[@]/autodetect}")
+		fi
+		
+		if ((RELEASE==1)); then
+			echo "Removing zquick_qumu, if present" 
+			echo
+			chosen_recipes=("${chosen_recipes[@]/zquick_qemu}")
+
+ 			echo "Removing strip, if present"
+			echo
+			chosen_systemhooks=("${chosen_systemhooks[@]/strip}")
+		fi
 	fi
 
-	# need to reorder strip
-	[[ -n $strip_sel ]] && system_hooks=( ${system_hooks[@]/strip} ) 
 
-	# zquick_core is first recipe, and always added
-	recipes=( zquick_core ${recipes[@]/zquick_core} ) 
 
+	if [[ ${chosen_systemhooks[*]} =~ strip ]]; then
+		move_strip=1
+		chosen_systemhooks=("${chosen_systemhooks[@]/strip}")
+	fi
+	if [[ ${chosen_systemhooks[*]} =~ autodetect ]]; then
+		move_autodetect=1
+		chosen_systemhooks=("${chosen_systemhooks[@]/autodetect}")
+	fi
+
+	hooks=()
+	# first autodetect
+	[[ -n $move_autodetect ]] && hooks+=("autodetect")
 	# first system hooks
-	hooks+=(${system_hooks[@]})
-
+	hooks+=("${chosen_systemhooks[@]}")
 	# then zfsbootmenu
 	hooks+=("zfsbootmenu")
+	# zquick_core recipe ia, and always added
+	hooks+=(zquick_core)
 	# then recipes
-	hooks+=(${recipes[@]})
-	# strip goes last
-	[[ -n $strip_sel ]] && hooks+=("strip")
-
+	hooks+=("${chosen_recipes[@]}")
+	# strip goes 2nd to last (if it was choosen)
+	[[ -n $move_strip ]] && hooks+=("strip")
+	# zquick_end goes last
 	hooks+=("zquick_end")
 
 	build_time=$(date -u +"%Y-%m-%d_%H%M%S");
 
-	mkdir -p /tmp
-	rm -rf /tmp/*
-	zquickinit="${INPUT}"
-	mkdir -p "${OUTPUT}"
-	cat > /tmp/mkinitcpio.conf <<-EOF
+	build_tmp="${OUTPUT}"/tmp
+	mkdir -p "${build_tmp}"
+	rm -rf "${build_tmp:?}"/*
+	
+	cat > "${build_tmp}/mkinitcpio.conf" <<-EOF
 		MODULES=()
 		BINARIES=()
 		FILES=()
@@ -372,7 +407,8 @@ make_zquick_initramfs() {
 			local dirname="\${1%/*}"
 			local file=
 			if [[ -n "${SECRETS}" ]]; then
-				[[ -f "${zquickinit}/${SECRETS}/\$filename" ]] && file="${zquickinit}/${SECRETS}/\$filename"
+				# [[ -f "${zquickinit}/${SECRETS}/\$filename" ]] && file="${zquickinit}/${SECRETS}/\$filename"
+				[[ -f "${zquickinit}/${SECRETS}\$1" ]] && file="${zquickinit}/${SECRETS}\$1"
 			else 
 				# shellcheck disable=SC2154
 				for path in "\$dirname" "$zquickinit"; do
@@ -435,9 +471,9 @@ make_zquick_initramfs() {
 		EOF
 	
 
-	echo "${KERNEL_CMDLINE}" > /tmp/cmdline
+	echo "${KERNEL_CMDLINE}" > "${build_tmp}/cmdline"
 
-	cat > /tmp/os-release <<-EOF
+	cat > "${build_tmp}/os-release" <<-EOF
 		NAME="ZFSQuickInit"
 		ID="ZFSQuickInit"
 		ID_LIKE="void"
@@ -452,23 +488,33 @@ make_zquick_initramfs() {
 	output_img="${OUTPUT}/zquickinit-$build_time.img"
 	output_uki="${OUTPUT}/zquickinit-$build_time.efi"
 	kernel="$(find "/lib/modules" -maxdepth 1 -type d| grep "/lib/modules/" | sort -V | tail -n 1)"
-	kernel="${kernel##/*}"
+	kernel="${kernel##*/}"
 
-	echo mkinitcpio --config /tmp/mkinitcpio.conf ${hookdirs[*]} \
-		--kernel "$kernel" "$MKINIT_VERBOSE" \
-		--osrelease /tmp/os-release \
-		--cmdline /tmp/cmdline \
-		--generate "$output_img" \
-		-U "$output_uki" 
+	if [[ -e "/boot/vmlinuz-$kernel" && ! -r "/boot/vmlinuz-$kernel" ]]; then
+		echo "/boot/vmlinuz-$kernel is not readable by your user, using sudo to copy image"
+		uid=$(id -u)
+		gid=$(id -g)
+		sudo cp "/boot/vmlinuz-$kernel" "${OUTPUT}/zquickinit-$build_time.vmlinuz-$kernel"
+		sudo chown "${uid}:${gid}" "${OUTPUT}/zquickinit-$build_time.vmlinuz-$kernel"
+	else
+		cp "/boot/vmlinuz-$kernel" "${OUTPUT}/zquickinit-$build_time.vmlinuz-$kernel"
+	fi
 
-	mkinitcpio --config /tmp/mkinitcpio.conf ${hookdirs[*]} \
-		--kernel "$kernel" "$MKINIT_VERBOSE" \
-		--osrelease /tmp/os-release \
-		--cmdline /tmp/cmdline \
-		--generate "$output_img" \
-		-U "$output_uki" 
-	cp "/boot/vmlinuz-$kernel" "${OUTPUT}/zquickinit-$build_time.vmlinuz-$kernel"
-	(cd "${OUTPUT}"; rm -rf vmlinuz; ln -s zquickinit-$build_time.vmlinuz-$kernel vmlinuz)
+	echo mkinitcpio --config "${build_tmp}/mkinitcpio.conf" ${hookdirs[*]} \
+		--kernel "${OUTPUT}/zquickinit-$build_time.vmlinuz-$kernel" "$MKINIT_VERBOSE" \
+		--osrelease "${build_tmp}/os-release" \
+		--cmdline "${build_tmp}/cmdline" \
+		--generate "${output_img}" \
+		-U "${output_uki}" 
+
+	mkinitcpio --config "${build_tmp}/mkinitcpio.conf" ${hookdirs[*]} \
+		--kernel "${OUTPUT}/zquickinit-$build_time.vmlinuz-$kernel" "$MKINIT_VERBOSE" \
+		--osrelease "${build_tmp}/os-release" \
+		--cmdline "${build_tmp}/cmdline" \
+		--generate "${output_img}" \
+		-U "${output_uki}" || :
+
+	rm -rf "${build_tmp}"
 	(cd "${OUTPUT}"; rm -rf zquickinit.efi; ln -s zquickinit-$build_time.efi zquickinit.efi)
 	chmod o+rw -R "${OUTPUT}"/*
 	chmod g+rw -R "${OUTPUT}"/*
@@ -477,6 +523,7 @@ make_zquick_initramfs() {
 	env LC_ALL=en_US.UTF-8 printf "EFI size: \t\t%'.0f bytes\n" "$(stat -c '%s' "$output_uki")"
 	find "${OUTPUT}" -name 'zquickinit*.img' | sort -r | tail -n +4 | xargs -r rm
 	find "${OUTPUT}" -name 'zquickinit*.efi' | sort -r | tail -n +4 | xargs -r rm
+	find "${OUTPUT}" -name 'zquickinit*.vmlinuz-*' | sort -r | tail -n +4 | xargs -r rm
 }
 
 initramfs() {
@@ -532,7 +579,7 @@ inject() {
 
 	inject_secret() {
 		local filename='' file='' dir=''
-		filename="${1##/*}"
+		filename="${1##*/}"
 		[[ -n "${INSTALLER_MODE:-}" ]] && dir="${1%/*}" || dir="."
 		# shellcheck disable=SC2154
 		for path in "$dir" "$1"; do
@@ -577,12 +624,12 @@ inject() {
 
 	version=
 	if [[ ${target} = *-* ]]; then
-		version=${target##*-}
+		version=${target#*-}
 		version=${version%.*}
 	fi
 
 	local injected=0
-	inject_secret "/zquick/etc/ttyd_pushover.conf"         "pushover ttyd config" && injected=1
+	inject_secret "/zquick/etc/zquickinit.conf"            "zquickinit config" && injected=1
 	inject_secret "/etc/tailscale/tailscaled.conf"         "tailscale config" && injected=1
 	inject_secret "/var/lib/tailscale/tailscaled.state"    "tailscale node identity" && injected=1
 	inject_secret "/root/.ssh/authorized_keys"             "sshd authorized_keys for root" && injected=1
@@ -611,19 +658,18 @@ inject() {
 		# ${FIND} "${tmp}" -not -path "${initrd}" -not -path "${source}" -print | \
 		# 	pax -x sv4cpio -wd -s#"${tmp}"## | zstd >> "${initrd}"
 
-		set -x
 		# shellcheck disable=SC2094
   		${FIND} "${tmp}" -not -path "${initrd}" -not -path "${source}" -print | \
-			bsdtar -P --format=newc -cf - --files-from - -s#"${tmp}"## | zstd >> "${initrd}"
-		set +x 
-		${FIND} "${tmp}" -not -path "${initrd}" -not -path "${source}" -print
+			bsdtar -P --format=newc -c -f - -T - -n -s#"${tmp}"## | zstd >> "${initrd}"
 
 		echo "Copying original EFI ${source} to ${target}..."
 		cp "${source}" "${target}"
 		echo "Removing original initramfs section from EFI in ${target}..."
 		$OBJCOPY --remove-section .initrd "${target}"
+		
 		echo "Adding new initramfs section from ${initrd} to ${target}..."
 		$OBJCOPY --add-section .initrd="${initrd}" --change-section-vma .initrd=0x3000000 "${target}"
+
 	else
 		echo "No secrets to inject."
 		echo "Copying ${source} to ${target}..."
@@ -642,9 +688,9 @@ inject() {
 		echo "linux    /EFI/${btarget}" >> "$conf"
 		
 		timeout=3
-		sed -ir "/^timeout /{h;s/ .*\$/ ${timeout}/};\${x;/^$/{s//timeout ${timeout}/;H};x}" "${ADD_LOADER}/loader/loader.conf"
+		sed -i -r "/^timeout /{h;s/ .*\$/ ${timeout}/};\${x;/^$/{s//timeout ${timeout}/;H};x}" "${ADD_LOADER}/loader/loader.conf"
 		entry=${conf##*/}
-		sed -ir "/^default /{h;s/ .*\$/ ${entry}/};\${x;/^$/{s//default ${entry}/;H};x}" "$conf"
+		sed -i -r "/^default /{h;s/ .*\$/ ${entry}/};\${x;/^$/{s//default ${entry}/;H};x}" "${ADD_LOADER}/loader/loader.conf"
 	fi
 	
 
@@ -758,7 +804,7 @@ playground() {
 		fi
 	fi
 
-	APPEND=("loglevel=6 zbm.show")
+	APPEND=("loglevel=6 zbm.show printk.time=1")
 	SSH_PORT=2222
 	aoi=''
 	if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -773,11 +819,20 @@ playground() {
 		-object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-pci,rng=rng0 
 		-object iothread,id=iothread0
 		-netdev user,id=n1,hostfwd=tcp::"${SSH_PORT}"-:22,hostfwd=tcp::8006-:8006 -device virtio-net-pci,netdev=n1 
-		-device virtio-scsi-pci,id=scsi0,iothread=iothread0
-		-device scsi-hd,drive=drive1,bus=scsi0.0,bootindex=1,rotation_rate=1
-		-device scsi-hd,drive=drive2,bus=scsi0.0,bootindex=2,rotation_rate=1
-		-drive file=/tmp/disk.raw,format=raw,if=none,discard=unmap${aoi},cache=writeback,id=drive1,unit=0
-		-drive file=/tmp/disk2.raw,format=raw,if=none,discard=unmap${aoi},cache=writeback,id=drive2,unit=1
+		-device virtio-scsi-pci,id=scsi0,iothread=iothread0)
+	# shellcheck disable=SC2054
+	((DRIVE1==1)) && args+=(
+		-device scsi-hd,drive=drive1,bus=scsi0.0,bootindex=1,rotation_rate=1)
+	# shellcheck disable=SC2054
+	((DRIVE2==1)) && args+=(
+		-device scsi-hd,drive=drive2,bus=scsi0.0,bootindex=2,rotation_rate=1)
+	# shellcheck disable=SC2054
+	((DRIVE1==1)) && args+=(
+		-drive file=/tmp/disk.raw,format=raw,if=none,discard=unmap${aoi},cache=writeback,id=drive1,unit=0)
+	# shellcheck disable=SC2054
+	((DRIVE2==1)) && args+=(
+		-drive file=/tmp/disk2.raw,format=raw,if=none,discard=unmap${aoi},cache=writeback,id=drive2,unit=1)
+	args+=(
 		-serial "mon:stdio"
 	)
 	if [[ -z "${NOQEMU}" ]]; then
@@ -809,12 +864,12 @@ playground() {
 		args+=(-display none)
 	fi
 
-	ovmf=$(${FIND} /usr -name edk2-x86_64-code.fd 2>/dev/null | head -n1 || true)
+	ovmf=$(${FIND} /usr -name edk2-x86_64-code.fd 2>/dev/null | head -n1 || :)
 	if [[ -n "${ovmf}" ]]; then
 		echo "Using UEFI firmware: ${ovmf}"
 		args+=(-drive "file=${ovmf},if=pflash,format=raw,readonly=on")
 	else 
-		ovmf=$(${FIND} /usr | grep OVMF.fd | head -n1 || true)
+		ovmf=$(${FIND} /usr | grep OVMF.fd | head -n1 || :)
 		if [[ -n "${ovmf}" ]]; then
 			echo "Using UEFI firmware: ${ovmf}"
 			args+=(-bios "${ovmf}")
@@ -856,14 +911,16 @@ playground() {
 	[[ -n "${SSHONLY}" ]] && echo Running in SSH only mode, to enter SSH use command: ssh root@localhost -p 2222
 	echo
 	echo 	"${args[@]}"
-	read -n 1 -s -r -p "Press any key to launch QEMU"
+	set +e
+	read -n 1 -s -r -t 3 -p "Press any key or wait to launch QEMU"
+	set -e
 	echo
 	echo "Starting..."
 	"${args[@]}"
 }
 
 command=${1:-}
-shift || true
+shift || :
 if [[ $(type -t "$command") == function ]]; then
 	ARGS=()
 	while (($# > 0)); do
@@ -947,11 +1004,11 @@ elif [[ -z "${SOURCE}" ]]; then
 			echo "If any of the folowing files are present in the current directory, they will be injected into the image"
 			echo "after it is downloaded. If none are present, then ZQuickInit EFI image will downloaded without any changes."
 			echo
-			echo "ttyd_pushover.conf tailscaled.conf tailscaled.state authorized_keys ssh_host_rsa_key ssh_host_ecdsa_key ssh_host_ed25519_key"
+			echo "zquickinit.conf tailscaled.conf tailscaled.state authorized_keys ssh_host_rsa_key ssh_host_ecdsa_key ssh_host_ed25519_key"
 			echo
 			echo "For a more interactive customization, choose 'Build ZQuickInit' from the previous menu"
 			echo
-			read -n 1 -s -r -p "Press any key to continue"
+			read -n 1 -rs -p "Press any key to continue"
 			echo
 			inject "$@"
 			exit $?

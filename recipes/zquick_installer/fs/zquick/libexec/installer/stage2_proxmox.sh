@@ -12,7 +12,7 @@ configure() {
 	if [ -f /etc/ssh/sshd_config ]; then
 		echo "NOTICE! Modifying /etc/ssh/sshd_config to allow root login"
 		sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-		systemctl enable ssh.service || true
+		systemctl enable ssh.service || :
 	fi
 
 	[ -e /etc/network/interfaces.new ] && interfaces_conf=/etc/network/interfaces.new || interfaces_conf=/etc/network/interfaces

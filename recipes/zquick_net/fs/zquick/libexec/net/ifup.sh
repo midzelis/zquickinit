@@ -1,12 +1,11 @@
 #!/bin/bash
 
-name="${0##*/}"
-log() {
-   logger -p user.notice -t "${name}" "$1"
-}
+source /zquick/libexec/utils.sh
 
 # this is a one time task
 [[ -f /zquick/run/ifup ]] && exit 0
+qinitlog "Starting network interfaces"
+
 mkdir -p /zquick/run
 touch /zquick/run/ifup
 
@@ -32,18 +31,16 @@ interfaces=$(ip link show | awk -F': ' '{print $2}')
 
 # Bring up each interface and get a DHCP IP address
 for interface in $interfaces; do
-		log "[$interface] Bringing up..."
-		if ip link set "$interface" up > /dev/kmsg; then
-				log "[$interface] Link OK"
+		qinitlog_start "Set link up: $interface"
+		if status=$(ip link set "$interface" up); then
+			qinitlog_end " [ OK ]"
 		else
-				log "[$interface] Link FAILED"
+			qinitlog_end " [ FAILED ] ${status}"
 		fi
 		[[ $interface == 'lo' ]] && continue
-		log "Getting IP address using DHCP"
-
-		# only keep the funnel URL up for 30 minutes
-		dhclient "$interface" -lf /var/lib/dhcp/dhclient.leases || true
+		qinitlog "DHCP client (dhclient): [$interface]"
+		dhclient "$interface" -lf /var/lib/dhcp/dhclient.leases -nw || :
 done
 
+qinitlog "Starting network services"
 /zquick/libexec/run_hooks.sh ifup.d
-

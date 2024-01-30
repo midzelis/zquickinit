@@ -1,11 +1,5 @@
 #!/bin/bash
 
-PUSHOVER_APP_TOKEN=
-PUSHOVER_USER_KEY=
-if [[ -r /zquick/etc/ttyd_pushover.conf ]]; then
-    source /zquick/etc/ttyd_pushover.conf
-fi
-
 if [[ -n "${PUSHOVER_APP_TOKEN}" ]] && [[ -n "${PUSHOVER_USER_KEY}" ]]; then
 
     curl -s \

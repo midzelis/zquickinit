@@ -1,44 +1,43 @@
 #!/bin/bash
 
-mount -t proc proc /proc -o nosuid,noexec,nodev
-mount -t sysfs sys /sys -o nosuid,noexec,nodev
-mount -t devtmpfs dev /dev -o mode=0755,nosuid
-mount -t tmpfs run /run -o nosuid,nodev,mode=0755
+start_getty() {
+    if [[ -e "$1" ]]; then
+        while true; do
+            ( exec setsid getty -n -l  0 "$1" > /dev/kmsg 2>&1 )
+        done 
+    fi
+}
 
-if [ -e /sys/firmware/efi ]; then
-    mount -t efivarfs efivarfs /sys/firmware/efi/efivars -o nosuid,nodev,noexec
-fi
+trap '' EXIT INT TERM
+#tput clear
 
-# Setup /dev symlinks
-if [ -e /proc/kcore ]; then
-    ln -sfT /proc/kcore /dev/core
-fi
-ln -sfT /proc/self/fd /dev/fd
-ln -sfT /proc/self/fd/0 /dev/stdin
-ln -sfT /proc/self/fd/1 /dev/stdout
-ln -sfT /proc/self/fd/2 /dev/stderr
 
-mkdir -p /var/log
-touch /var/log/messages
-syslogd
-klogd -c 4
-udevd --daemon --resolve-names=never
-udevadm trigger --action=add --type=subsystems
-udevadm trigger --action=add --type=devices
+# read all configured consoles
+read -r active < /sys/class/tty/console/active
 
-hooks="/lib/zfsbootmenu-parse-commandline.sh /lib/zfsbootmenu-preinit.sh"
+# start prelogin on all consoles
+for c in ${active}; do
+    start_getty "/dev/${c}" /init.prelogin &
+done
 
-# for hook in ${hooks}; do
-#     [ -r "${hook}" ] && . "${hook}" && continue
+# wait for prelogin tasks to finish
+wait 
 
-#     echo "ERROR: failed to load hook "${hook}"; good luck..."
-#     getty -n -l /bin/sh 0 /dev/ttyS0
-# done
+# read active consoles into array
+read -r -a secondary <<< "$active"
+# last item in list is the one connected to /dev/console and is considered
+# the "main" console
+console=${secondary[-1]}
+# remove last
+unset 'secondary[-1]'
 
-# ( exec setsid getty -n -l /zquick/init 0 /dev/ttyS0 & )
-# ( exec setsid getty -n -l /zquick/init 0 /dev/hvc0 & )
-# ( exec setsid getty -n -l /zquick/init 0 /dev/ttyUSB0 & )
+# start login on secondary console
+for c in "${secondary[@]}"; do
+    start_getty "/dev/${c}" /zquick/init &
+done
 
-# getty -n -l /zquick/init 0 /dev/tty1
+# start login on primary console
+start_getty "/dev/${console}" /zquick/init
 
-bash
+#this magic will redirect everything to another term
+#bash -i -l 2>&1 | tee /dev/tty1

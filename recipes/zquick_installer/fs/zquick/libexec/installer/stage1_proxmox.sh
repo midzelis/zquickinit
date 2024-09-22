@@ -50,8 +50,8 @@ debootstrap() {
 
   get_from_tar() {
     (cd "${DEBROOT}" && \
-      wget http://ftp.debian.org/debian/pool/main/d/debootstrap/debootstrap_1.0.132.tar.gz && \
-      tar zxf debootstrap_1.0.132.tar.gz
+      wget https://ftp.debian.org/debian/pool/main/d/debootstrap/debootstrap_1.0.137.tar.gz && \
+      tar zxf debootstrap_1.0.137.tar.gz
     )
   }
 
@@ -100,4 +100,3 @@ if [ -d "/mnt/cache" ]; then
   mkdir -p "${_aptdir}"
   echo "Dir::Cache::Archives /tmp/cache;" > "${_aptdir}/00cache"
 fi
-

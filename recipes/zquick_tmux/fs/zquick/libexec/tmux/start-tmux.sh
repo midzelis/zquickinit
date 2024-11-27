@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -x
-
 source /etc/zquickinit.conf
 
 if [ ! -d /dev/pts ]; then

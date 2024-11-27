@@ -1,0 +1,14 @@
+xbps-packages:
+  - git
+  - curl
+  - gummiboot
+  - systemd-boot
+  - pv
+  # - libarchive-tools
+  - libarchive
+  - findutils
+  - rsync
+  - util-linux
+  - hdparm
+  - perl
+help: "Download and install proxmox to root partition"

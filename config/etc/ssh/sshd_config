@@ -1,5 +1,0 @@
-Port 22
-PermitRootLogin yes
-PubkeyAuthentication yes
-IgnoreUserKnownHosts yes
-MaxAuthTries 10

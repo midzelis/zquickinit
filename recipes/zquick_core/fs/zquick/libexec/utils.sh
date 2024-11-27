@@ -2,7 +2,7 @@
 
 # this will prevent the command stout from being buffered
 unbuffer() {
-   /usr/sbin/script -q /dev/null sh -c "${1}"
+    /usr/sbin/script -qfc "$(printf "%q " "$@")" /dev/null
 }
 
 name="${0##*/}"

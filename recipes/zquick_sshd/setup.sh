@@ -2,22 +2,22 @@
 set -euo pipefail
 
 confirm() {
-    local code=
-    gum confirm "$@" && code=$? || code=$? 
-    ((code>2)) && exit $code
-    return $code
+	local code=
+	gum confirm "$@" && code=$? || code=$?
+	((code > 2)) && exit $code
+	return $code
 }
 
-help_text=$(cat <<-EOF
-	# \`zquick_sshd\` sets up sshd server. 
-	<br>
+help_text=$(
+	cat <<-EOF
+		# \`zquick_sshd\` sets up sshd server. 
+		<br>
 	EOF
-	)
+)
 gum format "${help_text}" " "
 
-
-cols="$( tput cols 2>/dev/null )"
-cols=$((cols-5))
+cols="$(tput cols 2>/dev/null)"
+cols=$((cols - 5))
 
 msg=
 value=
@@ -31,15 +31,15 @@ else
 		PubkeyAuthentication yes
 		IgnoreUserKnownHosts yes
 		MaxAuthTries 10
-		EOF
+	EOF
 fi
-
-gum format "Edit sshd_config. ${msg}" "See https://man.openbsd.org/sshd_config" "Press ctrl-d to finish. Empty string will leave unconfigured."
+echo
+gum format "Edit sshd_config. ${msg}" "See https://man.openbsd.org/sshd_config" "" "Empty string will leave unconfigured."
 echo
 out=$(gum write --char-limit=0 --height=10 --width="$cols" --placeholder="sshd_config" --value="${value}")
 if [[ -n $out ]]; then
 	mkdir -p "${zquickinit_config}/etc/ssh"
-	echo "$out" > "${zquickinit_config}/etc/ssh/sshd_config"
+	echo "$out" >"${zquickinit_config}/etc/ssh/sshd_config"
 else
 	gum format "No SSHd configuration, SSHd server will not start until configuration is injected into image."
 fi
@@ -63,13 +63,13 @@ if [[ -f "${zquickinit_config}/root/.ssh/authorized_keys" ]]; then
 	set +e
 	while IFS= read -r line || [ -n "$line" ]; do
 		value="${value}${line}"$'\n'
-	done < "${zquickinit_config}/root/.ssh/authorized_keys"
+	done <"${zquickinit_config}/root/.ssh/authorized_keys"
 	set -e
 fi
-gum format "Edit root authorized_keys." "See https://man.openbsd.org/sshd.8#AUTHORIZED_KEYS_FILE_FORMAT" "Press ctrl-d to finish. Empty string will leave unconfigured."
-echo
+gum format "Edit root authorized_keys." "See [Keys Format](https://man.openbsd.org/sshd.8#AUTHORIZED_KEYS_FILE_FORMAT)" "" "Empty string will leave unconfigured." ""
 out=$(gum write --char-limit=0 --height=10 --width="$cols" --placeholder="ssh-ed25519 AAAA..." --value="${value}")
 if [[ -n $out ]]; then
 	mkdir -p "${zquickinit_config}/root/.ssh"
-	echo "$out" > "${zquickinit_config}/root/.ssh/authorized_keys"
+	echo "$out" >"${zquickinit_config}/root/.ssh/authorized_keys"
+	chmod 644 "${zquickinit_config}/root/.ssh/authorized_keys"
 fi

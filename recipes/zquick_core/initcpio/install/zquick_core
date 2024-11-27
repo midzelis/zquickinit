@@ -2,13 +2,13 @@
 
 add_terminfo() {
 	terms="l/linux v/vt100 v/vt102 v/vt220 x/xterm x/xterm-color x/xterm-256color"
-    # Find the first path that contains a linux terminfo
-    for search in /etc /lib /usr/share; do
+	# Find the first path that contains a linux terminfo
+	for search in /etc /lib /usr/share; do
 		for term in $terms; do
-        	[[ -r "${search}/terminfo/${term}" ]] || continue
+			[[ -r "${search}/terminfo/${term}" ]] || continue
 			add_file "${search}/terminfo/${term}" "/usr/share/terminfo/${term}"
 		done
-    done
+	done
 }
 
 build() {
@@ -18,12 +18,12 @@ build() {
 
 	add_terminfo
 
-	if ! "${BUILDROOT}/bin/busybox" --list | grep login >/dev/null; then
-		add_binary login
-		cat >> "${BUILDROOT}/etc/login.defs" <<-'EOF'
-			LOGIN_TIMEOUT=0
-		EOF
-	fi
+	# if ! "${BUILDROOT}/bin/busybox" --list | grep login >/dev/null; then
+	add_binary login
+	cat >>"${BUILDROOT}/etc/login.defs" <<-'EOF'
+		LOGIN_TIMEOUT=0
+	EOF
+	# fi
 	add_binary clear
 	add_binary reset
 	add_binary script
@@ -45,22 +45,27 @@ build() {
 	add_file /etc/shells
 	[[ -r /etc/default/locale ]] && add_file /etc/default/locale
 
-	cat >> "${BUILDROOT}/root/.bashrc" <<-'EOF'
+	cat >>"${BUILDROOT}/root/.bashrc" <<-'EOF'
+		export PS1='\[\033[0;33m\]zquickinit\[\033[0m\] \w > '
+
 		PATH="$PATH":/zquick
 		export TERM='xterm-256color'
 		alias ls='ls --color=auto' 
 		alias grep='grep --colour=auto'
+
+		gum format -- "# Try these commands:"
 		/zquick/libexec/run_hooks.sh bash.d
-		gum format -t template -- "{{ Foreground \"#ff9770\" \"'zbm'\"}} will launch ZFSBootmenu" ""
-		gum format -t template -- "{{ Foreground \"#ff9770\" \"'zquickinit.sh'\"}} allows you to rebuild/update this initramfs env" "" 
-		EOF
+		gum format -- "## zbm" "- Launch ZFSBootmenu" ""
+		echo
+		gum format -- "## tmux-help" "- Display tmux cheatsheet" ""
+		echo
+	EOF
 
-	printf '%s\n' >"$BUILDROOT/etc/nsswitch.conf" \
-         'passwd: files' \
-         'group: files' \
-         'shadow: files'
+	printf '%s\n' \
+		'passwd: files' \
+		'group: files' \
+		'shadow: files' >"$BUILDROOT/etc/nsswitch.conf"
 
-  
 	encrypted=
 	if [[ -f "${zquickinit_config}/etc/zquickinit.conf" ]]; then
 		root_password=$(sed -rn '/^root_password=/s/.*=(.*)/\1/p' "${zquickinit_config}/etc/zquickinit.conf")
@@ -72,18 +77,18 @@ build() {
 		fi
 	fi
 
-  	echo "root:${encrypted}:0:0:root:/root:/bin/bash" >"$BUILDROOT/etc/passwd"
+	echo "root:${encrypted}:0:0:root:/root:/zquick/libexec/tmux/t.sh" >"$BUILDROOT/etc/passwd"
 	echo "sshd:*:91:91::/run/sshd:/bin/false" >>"$BUILDROOT/etc/passwd"
 	echo "nobody:*:99:99::/dev/null:/bin/false" >>"$BUILDROOT/etc/passwd"
-	
-    getent group root audio disk input kmem kvm lp optical render sgx storage tty uucp video | awk -F: ' { print $1 ":x:" $3 ":" }' >"$BUILDROOT/etc/group"
+
+	getent group root audio disk input kmem kvm lp optical render sgx storage tty uucp video | awk -F: ' { print $1 ":x:" $3 ":" }' >"$BUILDROOT/etc/group"
 
 	libpaths=(/lib /usr/lib /lib64 /usr/lib64)
 	for conf in /etc/ld.so.conf.d/*; do
 		while read -r line; do
 			[[ "$line" =~ ^#.*$ ]] && continue
 			libpaths+=("$line")
-		done < "$conf"
+		done <"$conf"
 	done
 	libs=(security/pam_warn.so security/pam_deny.so security/pam_unix.so security/pam_env.so security/pam_nologin.so)
 	for llib in "${libs[@]}"; do
@@ -109,7 +114,7 @@ build() {
 			add_binary /usr/bin/udevadm
 		fi
 		add_file "/etc/udev/udev.conf"
-		search=('/etc/systemd/hwdb/', '/etc/udev/', '/usr/lib/systemd/hwdb', )
+		search=('/etc/systemd/hwdb/', '/etc/udev/', '/usr/lib/systemd/hwdb',)
 
 		found=
 		for f in {/etc,/lib}{/systemd/hwdb,/udev} /usr/lib/systemd/hwdb; do
@@ -122,7 +127,7 @@ build() {
 			'60-persistent-storage.rules' \
 			'64-btrfs.rules' \
 			'80-drivers.rules'
-	
+
 		map add_file \
 			'/usr/lib/udev/ata_id' \
 			'/usr/lib/udev/scsi_id'

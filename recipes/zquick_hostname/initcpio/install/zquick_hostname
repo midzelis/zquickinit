@@ -1,13 +1,15 @@
 #!/bin/bash
 
 build() {
-	for hostname in "$zquickinit_root/hostname" "/etc/hostname"; do
+
+	for hostname in "$zquickinit_config/etc/hostname" "/etc/hostname"; do
 		[[ -f "$hostname" ]] && break
 	done
 
+	warning "using $hostname"
 	if [ ! -r "$hostname" ]; then
 		warning "Hostname not found"
-	else 
+	else
 		add_file "$hostname" /etc/hostname
 	fi
 

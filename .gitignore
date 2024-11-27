@@ -9,5 +9,6 @@ tailscaled.state*
 cache
 *test*
 *ssh_host*
+*sshd_config*
 *.code-workspace
 authorized_keys

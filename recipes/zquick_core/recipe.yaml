@@ -1,12 +1,14 @@
 xbps-packages:
- - ncurses
- - strace
- - gum
- - yq-go
- - htop
- - file
- - busybox-huge
- - util-linux
+  - ncurses
+  - strace
+  - gum
+  - yq-go
+  - htop
+  - file
+  - busybox-huge
+  - util-linux
+  - pciutils
+  - lshw
 debian-packages:
- - kbd
+  - kbd
 help: "Required common dependencies to all recipes"

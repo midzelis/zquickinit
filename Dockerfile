@@ -10,7 +10,7 @@
 
 # Use the official Void Linux container
 FROM ghcr.io/void-linux/void-glibc-full 
-LABEL org.opencontainers.image.source https://github.com/midzelis/zquickinit
+LABEL org.opencontainers.image.source=https://github.com/midzelis/zquickinit
 
 ARG XBPS_REPOS="https://repo-fastly.voidlinux.org/current https://repo-fastly.voidlinux.org/current/nonfree"
 
@@ -21,7 +21,7 @@ ARG XBPS_REPOS="https://repo-fastly.voidlinux.org/current https://repo-fastly.vo
 # Default: install 5.10, 5.15, 6.1 and 6.2
 #
 # (multiple entries must be seperated by spaces)
-ARG KERNELS="linux5.10 linux5.15 linux6.1 linux6.2" 
+ARG KERNELS="linux5.10 linux5.15 linux6.1 linux6.2 linux6.6 linux6.8" 
 
 # Run the following within an external cache (/var/cache/xbps) for the 
 # package manager; so when this layer is rebuilt, at least you save 
@@ -81,6 +81,7 @@ ARG PACKAGES=
 # Run ${PACKAGES} install in seperate layer so that the zfs dkms packages 
 # are not rebuilt when ${PACKAGES} change. reuse. Additionally: use xbps cache. 
 RUN --mount=type=cache,target=/var/cache/xbps <<-EOF 
+
 	# Install ZFSBootMenu dependencies and components necessary to build images
 	xbps-install -S
 	xbps-install -y ${PACKAGES}
@@ -116,8 +117,9 @@ RUN <<-EOF
 
 COPY --chmod=755 zquickinit.sh /
 
+RUN ls /usr/bin 
 # use busybox-huge version (vs busybox.static) (for syslogd support)
-RUN [ -x /usr/bin/busybox ] && cp -f /usr/bin/busybox /usr/lib/initcpio/busybox
+RUN [ -x /usr/bin/busybox ] && cp -f /usr/bin/busybox /usr/lib/initcpio/busybox || true
 
 # Run the build script with no arguments by default
 ENTRYPOINT [ "/zquickinit.sh" ]

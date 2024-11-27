@@ -2,7 +2,7 @@
 # vim: softtabstop=2 shiftwidth=2 expandtab
 
 # This file was mostly copied and serves the same function as "zfsbootmenu-init" from the zfsbootmenu project
-# It has been adapted to exit instead of launch an emergecy shell 
+# It has been adapted to exit instead of launch an emergecy shell
 
 # disable ctrl-c (SIGINT)
 trap '' SIGINT
@@ -18,17 +18,17 @@ sources=(
 )
 
 stop() {
-    tput clear
-  	echo $( colorize green "zfsbootmenu prelogin menu failed")${1:+: $1}
-    echo
-    read -rs -t3 -n1 -p "Press any key or wait to continue ..."
-    echo
-    exit 1
+  tput clear
+  echo $(colorize green "zquickinit prelogin finished")${1:+: $1}
+  echo
+  read -rs -t3 -n1 -p $'Press any key or wait to continue ...\n\n'
+  echo
+  exit 1
 }
 
 for src in "${sources[@]}"; do
   # shellcheck disable=SC1090
-  if ! source "${src}" >/dev/null 2>&1 ; then
+  if ! source "${src}" >/dev/null 2>&1; then
     echo -e "\033[0;31mWARNING: ${src} was not sourced; unable to proceed\033[0m"
     exec /bin/bash
   fi
@@ -42,13 +42,13 @@ mkdir -p "${BASE:=/zfsbootmenu}"
 mount_efivarfs "ro"
 
 # Attempt to load spl normally
-if ! _modload="$( modprobe spl 2>&1 )" ; then
+if ! _modload="$(modprobe spl 2>&1)"; then
   zdebug "${_modload}"
 
   # Capture the filename for spl.ko
-  _modfilename="$( modinfo -F filename spl )"
+  _modfilename="$(modinfo -F filename spl)"
 
-  if [ -n "${_modfilename}" ] ; then
+  if [ -n "${_modfilename}" ]; then
     zinfo "loading ${_modfilename}"
 
     # Load with a hostid of 0, so that /etc/hostid takes precedence and
@@ -59,14 +59,14 @@ if ! _modload="$( modprobe spl 2>&1 )" ; then
     #  1. spl.ko is already loaded because of the race condition
     #  2. there's an invalid parameter or value for spl.ko
 
-    if ! _modload="$( insmod "${_modfilename}" "spl_hostid=0" 2>&1 )" ; then
+    if ! _modload="$(insmod "${_modfilename}" "spl_hostid=0" 2>&1)"; then
       zwarn "${_modload}"
       zwarn "unable to load SPL kernel module; attempting to load ZFS anyway"
     fi
   fi
 fi
 
-if ! _modload="$( modprobe zfs 2>&1 )" ; then
+if ! _modload="$(modprobe zfs 2>&1)"; then
   zerror "${_modload}"
   stop "unable to load ZFS kernel modules"
 fi
@@ -74,8 +74,8 @@ fi
 udevadm settle
 
 # Write out a default or overridden hostid
-if [ -n "${spl_hostid}" ] ; then
-  if write_hostid "${spl_hostid}" ; then
+if [ -n "${spl_hostid}" ]; then
+  if write_hostid "${spl_hostid}"; then
     zinfo "writing /etc/hostid from command line: ${spl_hostid}"
   else
     # write_hostid logs an error for us, just note the new value
@@ -96,7 +96,7 @@ if [ -n "${zbm_hook_root}" ]; then
 fi
 
 # Remove the executable bit from any hooks in the skip list
-if zbm_skip_hooks="$( get_zbm_arg zbm.skip_hooks )" && [ -n "${zbm_skip_hooks}" ]; then
+if zbm_skip_hooks="$(get_zbm_arg zbm.skip_hooks)" && [ -n "${zbm_skip_hooks}" ]; then
   zdebug "processing hook skip directives: ${zbm_skip_hooks}"
   IFS=',' read -r -a zbm_skip_hooks <<<"${zbm_skip_hooks}"
   for _skip in "${zbm_skip_hooks[@]}"; do
@@ -149,7 +149,7 @@ while true; do
       # Otherwise, all possible pools were imported, nothing more to try
       break
     fi
-  elif [ "${import_policy}" == "hostid" ] && poolmatch="$( match_hostid "${try_pool}" )"; then
+  elif [ "${import_policy}" == "hostid" ] && poolmatch="$(match_hostid "${try_pool}")"; then
     zdebug "match_hostid returned: ${poolmatch}"
 
     spl_hostid="${poolmatch##*;}"
@@ -157,7 +157,7 @@ while true; do
     export spl_hostid
 
     # Store the hostid to use for for KCL overrides
-    echo -n "$spl_hostid" > "${BASE}/spl_hostid"
+    echo -n "$spl_hostid" >"${BASE}/spl_hostid"
 
     # If match_hostid succeeds, it has imported *a* pool...
     if [ -n "${try_pool}" ] && [ "${zbm_require_bpool}" = "only" ]; then
@@ -180,10 +180,10 @@ while true; do
 
   # Just keep retrying after a delay until the user presses ESC
   if timed_prompt -d "${zbm_import_delay:-5}" \
-    -p "Unable to import $( colorize magenta "${try_pool:-pool}" ), retrying in $( colorize yellow "%0.2d" ) seconds" \
+    -p "Unable to import $(colorize magenta "${try_pool:-pool}"), retrying in $(colorize yellow "%0.2d") seconds" \
     -r "to retry immediately" \
     -e "for a recovery shell"; then
-      continue
+    continue
   fi
 
   log_unimportable
@@ -194,28 +194,28 @@ done
 # restrict read-write access to any unhealthy pools
 while IFS=$'\t' read -r _pool _health; do
   if [ "${_health}" != "ONLINE" ]; then
-    echo "${_pool}" >> "${BASE}/degraded"
+    echo "${_pool}" >>"${BASE}/degraded"
     zerror "prohibiting read/write operations on ${_pool}"
   fi
-done <<<"$( zpool list -H -o name,health )"
+done <<<"$(zpool list -H -o name,health)"
 
-zdebug && zdebug "$( zreport )"
+zdebug && zdebug "$(zreport)"
 
 unsupported=0
 while IFS=$'\t' read -r _pool _property; do
   if [[ "${_property}" =~ "unsupported@" ]]; then
     zerror "unsupported property: ${_property}"
-    if ! grep -q "${_pool}" "${BASE}/degraded" >/dev/null 2>&1 ; then
-      echo "${_pool}" >> "${BASE}/degraded"
+    if ! grep -q "${_pool}" "${BASE}/degraded" >/dev/null 2>&1; then
+      echo "${_pool}" >>"${BASE}/degraded"
     fi
     unsupported=1
   fi
-done <<<"$( zpool get all -H -o name,property )"
+done <<<"$(zpool get all -H -o name,property)"
 
 if [ "${unsupported}" -ne 0 ]; then
   zerror "Unsupported features detected, Upgrade ZFS modules in ZFSBootMenu with generate-zbm"
-  timed_prompt -m "$( colorize red 'Unsupported features detected')" \
-    -m "$( colorize red 'Upgrade ZFS modules in ZFSBootMenu with generate-zbm')"
+  timed_prompt -m "$(colorize red 'Unsupported features detected')" \
+    -m "$(colorize red 'Upgrade ZFS modules in ZFSBootMenu with generate-zbm')"
 fi
 
 # Attempt to find the bootfs property
@@ -227,14 +227,14 @@ while read -r line; do
     BOOTFS="${line}"
     break
   fi
-done <<<"$( zpool list -H -o bootfs ${boot_pool} )"
+done <<<"$(zpool list -H -o bootfs ${boot_pool})"
 
 if [ -n "${BOOTFS}" ]; then
   export BOOTFS
-  echo "${BOOTFS}" > "${BASE}/bootfs"
+  echo "${BOOTFS}" >"${BASE}/bootfs"
 fi
 
-: > "${BASE}/initialized"
+: >"${BASE}/initialized"
 
 # If BOOTFS is not empty display the fast boot menu
 # shellcheck disable=SC2154
@@ -242,19 +242,19 @@ if [ "${menu_timeout}" -ge 0 ] && [ -n "${BOOTFS}" ]; then
   # Draw a countdown menu
   # shellcheck disable=SC2154
   if timed_prompt -d "${menu_timeout}" \
-    -p "Booting $( colorize cyan "${BOOTFS}" ) in $( colorize yellow "%0.${#menu_timeout}d" ) seconds" \
+    -p "Booting $(colorize cyan "${BOOTFS}") in $(colorize yellow "%0.${#menu_timeout}d") seconds" \
     -r "boot now " \
-    -e "boot menu" ; then
+    -e "boot menu"; then
     # This lock file is present if someone has SSH'd to take control
     # Do not attempt to automatically boot if present
-    if [ ! -e "${BASE}/active" ] ; then
+    if [ ! -e "${BASE}/active" ]; then
       # Clear screen before a possible password prompt
       tput clear
       if ! NO_CACHE=1 load_key "${BOOTFS}"; then
-        stop "unable to load key for $( colorize cyan "${BOOTFS}" )"
+        stop "unable to load key for $(colorize cyan "${BOOTFS}")"
       elif find_be_kernels "${BOOTFS}" && [ ! -e "${BASE}/active" ]; then
         # Automatically select a kernel and boot it
-        kexec_kernel "$( select_kernel "${BOOTFS}" )"
+        kexec_kernel "$(select_kernel "${BOOTFS}")"
       fi
     fi
   fi
@@ -262,7 +262,7 @@ fi
 
 # If the lock file is present, drop to a recovery shell to avoid
 # stealing control back from an SSH session
-if [ -e "${BASE}/active" ] ; then
+if [ -e "${BASE}/active" ]; then
   stop "an active instance is already running"
 fi
 

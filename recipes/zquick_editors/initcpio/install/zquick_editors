@@ -3,4 +3,5 @@
 build() {
 	add_binary vi
 	add_binary nano
+	zquick_add_fs
 }

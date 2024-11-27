@@ -10,7 +10,7 @@ function reboot {
     done
 
     echo "Unmounting filesystems"
-    pools=$(zpool list -H -o name)
+    pools=$(zpool list -H -o name || :)
     for pool in $pools; do
         zpool export "$pool"
     done

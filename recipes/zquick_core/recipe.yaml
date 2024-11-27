@@ -1,11 +1,14 @@
 xbps-packages:
- - ncurses
- - strace
- - gum
- - yq-go
- - htop
- - file
- - lvm2
- - mkinitcpio-lvm2
- - thin-provisioning-tools
+  - ncurses
+  - strace
+  - gum
+  - yq-go
+  - htop
+  - file
+  - busybox-huge
+  - util-linux
+  - pciutils
+  - lshw
+debian-packages:
+  - kbd
 help: "Required common dependencies to all recipes"

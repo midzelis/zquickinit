@@ -1,0 +1,5 @@
+xbps-packages:
+ - lvm2
+ - mkinitcpio-lvm2
+ - thin-provisioning-tools
+help: "LVM support"

@@ -288,8 +288,11 @@ Uses Hooks:
   * `/zquick/hooks/ifup.d`
   * `/zquick/hooks/ifdown.d`
 
-Config Files: 
-* `ttyd_pushover.conf` -> `/zquick/etc/ttyd_pushover.conf`
+Config Properties (in zquickinit.conf) 
+`
+PUSHOVER_APP_TOKEN=aabbccddaabbccddaabbccdd
+PUSHOVER_USER_KEY=aabbccddaabbccddaabbccdd
+`
 
 ### zquick_installer
   * Provides script `zquick_installer.sh` 

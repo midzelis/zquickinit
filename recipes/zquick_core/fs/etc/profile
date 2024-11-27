@@ -1,0 +1,3 @@
+#!/bin/bash
+export PATH=/zbm/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export TERMINFO_DIRS=/usr/share/terminfo

@@ -1,0 +1,26 @@
+[Unit]
+Description=zquick
+After=initrd.target systemd-udev-trigger.service
+OnFailure=emergency.target
+OnFailureJobMode=replace-irreversibly
+AssertPathExists=/etc/initrd-release
+Conflicts=initrd-parse-etc.service
+ConditionPathExists=/etc
+Wants=initrd.target
+
+[Service]
+Type=idle
+# TTYPath=/dev/console
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=no
+KillMode=process
+IgnoreSIGPIPE=no
+SendSIGHUP=yes
+StandardOutput=tty 
+StandardError=tty
+StandardInput=tty
+ExecStart=/bin/bash /libexec/zfsbootmenu-initcpio
+
+[Install]
+WantedBy=initrd.target

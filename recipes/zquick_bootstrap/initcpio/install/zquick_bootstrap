@@ -1,0 +1,46 @@
+#!/bin/bash
+
+build() {
+	add_file "$zquickinit"/zquickinit.sh /zquick/zquickinit.sh
+
+	zquick_add_fs
+
+	add_binary rsync
+	add_binary blockdev
+
+	add_full_dir /usr/share/git-core
+	add_full_dir /usr/libexec/git-core
+	add_binary git
+	add_binary pv
+	add_binary find
+
+	add_binary mkfs.fat
+	add_binary fsck.fat
+	add_binary mkfs.ext4
+	add_binary e2fsck
+	add_module nls_cp437
+	add_module nls_iso8859-1
+	add_module nls_utf8
+	add_binary hdparm
+	add_binary blkdiscard
+
+	add_binary perl
+	add_binary ar
+	add_binary mountpoint
+	add_binary umount
+	add_binary mount
+
+	if [[ -e /usr/lib/gummiboot/gummibootx64.efi ]]; then
+		add_binary gummiboot
+		add_file /etc/default/gummiboot
+		add_file /usr/lib/gummiboot/gummibootx64.efi
+	fi
+	if [[ -e /usr/lib/systemd/boot/efi/systemd-bootx64.efi ]]; then
+		add_binary bootctl
+		add_file /usr/lib/systemd/boot/efi/systemd-bootx64.efi
+	fi
+	add_binary objcopy
+	add_binary objdump
+	add_binary tee
+
+}

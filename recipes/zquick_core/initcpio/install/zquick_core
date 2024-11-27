@@ -1,13 +1,41 @@
 #!/bin/bash
 
+add_terminfo() {
+	terms="l/linux v/vt100 v/vt102 v/vt220 x/xterm x/xterm-color x/xterm-256color"
+	# Find the first path that contains a linux terminfo
+	for search in /etc /lib /usr/share; do
+		for term in $terms; do
+			[[ -r "${search}/terminfo/${term}" ]] || continue
+			add_file "${search}/terminfo/${term}" "/usr/share/terminfo/${term}"
+		done
+	done
+}
+
 build() {
-	add_file "${zquickinit_root}/zquickinit.sh" /zquick/zquickinit.sh
 	zquick_add_fs
 
+	zquick_add_secret /etc/zquickinit.conf "zquick init"
+
+	add_terminfo
+
+	# if ! "${BUILDROOT}/bin/busybox" --list | grep login >/dev/null; then
+	add_binary login
+	cat >>"${BUILDROOT}/etc/login.defs" <<-'EOF'
+		LOGIN_TIMEOUT=0
+	EOF
+	# fi
 	add_binary clear
 	add_binary reset
+	add_binary script
 	add_binary strace
-	add_binary yq-go
+	add_binary loadkeys
+	add_binary lspci
+	add_binary lshw
+	if which yq-go >/dev/null; then
+		add_binary yq-go /bin/yq
+	else
+		add_binary yq
+	fi
 	add_binary gum
 	add_binary htop
 
@@ -15,18 +43,97 @@ build() {
 	add_file /etc/passwd
 	add_file /etc/group
 	add_file /etc/shells
+	[[ -r /etc/default/locale ]] && add_file /etc/default/locale
 
-	cat >> "${BUILDROOT}/root/.bashrc" <<-'EOF'
+	cat >>"${BUILDROOT}/root/.bashrc" <<-'EOF'
+		export PS1='\[\033[0;33m\]zquickinit\[\033[0m\] \w > '
+
 		PATH="$PATH":/zquick
 		export TERM='xterm-256color'
 		alias ls='ls --color=auto' 
 		alias grep='grep --colour=auto'
-		for h in /zquick/hooks/bash.d/*; do
-			[ -x "${h}" ] || continue
-			source "${h}"
-		done
-		EOF
 
-	add_binary chsh
-	chroot "${BUILDROOT}" /bin/bash -c "chsh -s /bin/bash" > /dev/null
+		gum format -- "# Try these commands:"
+		/zquick/libexec/run_hooks.sh bash.d
+		gum format -- "## zbm" "- Launch ZFSBootmenu" ""
+		echo
+		gum format -- "## tmux-help" "- Display tmux cheatsheet" ""
+		echo
+	EOF
+
+	printf '%s\n' \
+		'passwd: files' \
+		'group: files' \
+		'shadow: files' >"$BUILDROOT/etc/nsswitch.conf"
+
+	encrypted=
+	if [[ -f "${zquickinit_config}/etc/zquickinit.conf" ]]; then
+		root_password=$(sed -rn '/^root_password=/s/.*=(.*)/\1/p' "${zquickinit_config}/etc/zquickinit.conf")
+		if [[ -n "$root_password" ]]; then
+			msg2 "root password is configured"
+			encrypted=$(echo "$root_password" | openssl passwd -6 -stdin)
+		else
+			warning "CAUTION! There is not root password set!!! zfsbootmenu will start automatically on all consoles. For more security, set variable \"root_password=\" in ${zquickinit_config}/etc/zquickinit.conf"
+		fi
+	fi
+
+	echo "root:${encrypted}:0:0:root:/root:/zquick/libexec/tmux/t.sh" >"$BUILDROOT/etc/passwd"
+	echo "sshd:*:91:91::/run/sshd:/bin/false" >>"$BUILDROOT/etc/passwd"
+	echo "nobody:*:99:99::/dev/null:/bin/false" >>"$BUILDROOT/etc/passwd"
+
+	getent group root audio disk input kmem kvm lp optical render sgx storage tty uucp video | awk -F: ' { print $1 ":x:" $3 ":" }' >"$BUILDROOT/etc/group"
+
+	libpaths=(/lib /usr/lib /lib64 /usr/lib64)
+	for conf in /etc/ld.so.conf.d/*; do
+		while read -r line; do
+			[[ "$line" =~ ^#.*$ ]] && continue
+			libpaths+=("$line")
+		done <"$conf"
+	done
+	libs=(security/pam_warn.so security/pam_deny.so security/pam_unix.so security/pam_env.so security/pam_nologin.so)
+	for llib in "${libs[@]}"; do
+		for ldir in "${libpaths[@]}"; do
+			lib=${ldir}/${llib}
+			[[ -e ${lib} ]] && add_binary "${lib}" && break
+		done
+	done
+
+	# UDEV stuff
+	use_systemd=$(sed -rn '/^use_systemd=/s/.*=(.*)/\1/p' "${zquickinit_config}/etc/zquickinit.conf")
+	if [[ "${use_systemd}" = "yes" ]]; then
+		echo "use systemd"
+	else
+		if [[ ! -f /usr/bin/udevd ]]; then
+			add_binary ${zquickinit_root}/recipes/zquick_core/extra/udevd /usr/bin/udevd
+		else
+			add_binary /usr/bin/udevd
+		fi
+		if [[ ! -f /usr/bin/udevadm ]]; then
+			add_binary ${zquickinit_root}/recipes/zquick_core/extra/udevadm /usr/bin/udevadm
+		else
+			add_binary /usr/bin/udevadm
+		fi
+		add_file "/etc/udev/udev.conf"
+		search=('/etc/systemd/hwdb/', '/etc/udev/', '/usr/lib/systemd/hwdb',)
+
+		found=
+		for f in {/etc,/lib}{/systemd/hwdb,/udev} /usr/lib/systemd/hwdb; do
+			[[ -f "${f}/hwdb.bin" ]] && add_file "${f}/hwdb.bin" && found=1 && break
+		done
+		[[ -z "${found}" ]] && add_file ${zquickinit_root}/recipes/zquick_core/extra/hwdb.bin /etc/udev/hwdb.bin
+
+		map add_udev_rule \
+			'50-udev-default.rules' \
+			'60-persistent-storage.rules' \
+			'64-btrfs.rules' \
+			'80-drivers.rules'
+
+		map add_file \
+			'/usr/lib/udev/ata_id' \
+			'/usr/lib/udev/scsi_id'
+	fi
+
+	# end UDEV
+
 }
+# https://pkginfo.devuan.org/cgi-bin/package-query.html?c=package&q=eudev=3.2.14-1

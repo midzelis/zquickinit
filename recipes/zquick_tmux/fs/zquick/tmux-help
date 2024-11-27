@@ -1,0 +1,8 @@
+#!/bin/bash
+
+gum format -- "tmux cheatsheet:" \
+    "- create window" "  - ctrl+b c" \
+    "- close window" "  - ctrl+b &" \
+    "- next window" "  - ctrl+b n" \
+    "- split horizontal" "  - ctrl+b %" \
+    "- Copy mode (scrollback)" "  - ctrl+b ["

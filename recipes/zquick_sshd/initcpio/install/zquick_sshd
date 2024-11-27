@@ -2,39 +2,31 @@
 
 build() {
 	zquick_add_fs
-	
+
 	add_binary sshd
-	add_binary ssh-keygen
-	
-	zquick_add_secret /root/.ssh/authorized_keys 	"sshd authorized_keys for root"
+	add_file /usr/libexec/sshd-session
 
-	zquick_add_secret /etc/ssh/ssh_host_rsa_key 	"sshd host rsa key"
-	zquick_add_secret /etc/ssh/ssh_host_ecdsa_key 	"sshd host ecdsa key"
-	zquick_add_secret /etc/ssh/ssh_host_ed25519_key "sshd host ed25519 key"
+	zquick_add_secret /root/.ssh/authorized_keys "sshd authorized_keys for root" 644
 
-	zquick_add_secret /etc/ssh/sshd_config 			"sshd configuration"
+	zquick_add_secret /etc/ssh/ssh_host_rsa_key "sshd host rsa key" 600
+	zquick_add_secret /etc/ssh/ssh_host_ecdsa_key "sshd host ecdsa key" 600
+	zquick_add_secret /etc/ssh/ssh_host_ed25519_key "sshd host ed25519 key" 600
 
-	if [[ -e "${BUILDROOT}/root/.ssh/authorized_keys" && ! -e "${BUILDROOT}/etc/ssh/ssh_host_rsa_key" && ! -e "${BUILDROOT}/etc/ssh/ssh_host_ecdsa_key" && ! -e "${BUILDROOT}/etc/ssh/ssh_host_ed25519_key" ]]; then
-		echo "Authorized_keys specified found, but hosts keys are missing, generating new host keys"
-		ssh-keygen -A
-		add_file /etc/ssh/ssh_host_rsa_key 
-		add_file /etc/ssh/ssh_host_ecdsa_key 
-		add_file /etc/ssh/ssh_host_ed25519_key 
+	zquick_add_secret /etc/ssh/ssh_host_rsa_key.pub "sshd host rsa pub key" 644
+	zquick_add_secret /etc/ssh/ssh_host_ecdsa_key.pub "sshd host ecdsa pub key" 644
+	zquick_add_secret /etc/ssh/ssh_host_ed25519_key.pub "sshd host ed25519 pub key" 644
+
+	zquick_add_secret /etc/ssh/sshd_config "sshd configuration" 644
+
+	if [[ ! -e "${BUILDROOT}/etc/ssh/ssh_host_rsa_key" && ! -e "${BUILDROOT}/etc/ssh/ssh_host_ecdsa_key" && ! -e "${BUILDROOT}/etc/ssh/ssh_host_ed25519_key" ]]; then
+		msg2 "No host keys specified, autogenerating new keys for this build. Keys will be not be saved to zquickinit configuration area."
+		ssh-keygen -A -f "${BUILDROOT}"
 	fi
 
-	if [[ ! -e "${zquickinit_root}/sshd_config" ]]; then
-		echo "No sshd_config specified, generating sshd_config that allows root login on port 22"
-		mkdir -p "${BUILDROOT}/etc/ssh"
-		cat <<-EOF > "${BUILDROOT}/etc/ssh/sshd_config"
-			Port 22
-			PermitRootLogin yes
-			IgnoreUserKnownHosts yes
-			MaxAuthTries 10
-			EOF
+	if [[ ! -e "${BUILDROOT}/etc/ssh/sshd_config" ]]; then
+		msg2 "sshd_config not found, sshd will likely not run until this file is present. (Can be injected into image later)"
+	elif [[ ! -e "${BUILDROOT}/root/.ssh/authorized_keys" ]]; then
+		msg2 "/root/.ssh/authorized_keys not found."
 	fi
 
-	if [[ ! -e "${BUILDROOT}/root/.ssh/authorized_keys" && ! -e "${BUILDROOT}/root/.ssh/sshd_config" ]]; then
-		echo "SSHd configuration incomplete (at build time): SSHd will not start until"
-		echo "/etc/ssh/sshd_config and /root/.ssh/authorized_keys are present in the initramfs image."
-	fi
 }

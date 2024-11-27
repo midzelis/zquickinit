@@ -1,12 +1,14 @@
+out
 output
 *.qcow2
 hostname
-ttyd_pushover.conf
+zquickinit.conf
 tailscaled.state*
 *.efi
 *.iso
 cache
 *test*
 *ssh_host*
+*sshd_config*
 *.code-workspace
 authorized_keys

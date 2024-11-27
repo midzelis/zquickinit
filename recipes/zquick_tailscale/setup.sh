@@ -1,14 +1,9 @@
 #!/bin/bash
-help_text=$(cat <<-EOF
-	# \`zquick_tailscale\` requires a tailsaled.state. 
-	<br>
-	EOF
-	)
-gum format "${help_text}" "Press ctrl-d to finish. Empty string will leave unconfigured."
-cols="$( tput cols 2>/dev/null )"
-cols=$((cols-5))
+gum format "# \`zquick_tailscale\` configures tailscale for remote pool unlock on reboots." "" "Enter the contents of tailscale.state file." "" "To create one, run \`zquickinit.sh tailscale\` or install a new tailscale in a VM or container and copy the contents of /var/lib/tailscale/tailscaled.state into this textbox" "" "Empty string will leave unconfigured." ""
+cols="$(tput cols 2>/dev/null)"
+cols=$((cols - 5))
 out=$(gum write --width="$cols" --placeholder="tailscale state")
 if [[ -n $out ]]; then
-	mkdir -p /var/lib/tailscale
-	echo "$out" > /var/lib/tailscale/tailscaled.state
+	mkdir -p "${zquickinit_config}/var/lib/tailscale"
+	echo "$out" >"${zquickinit_config}/var/lib/tailscale/tailscaled.state"
 fi

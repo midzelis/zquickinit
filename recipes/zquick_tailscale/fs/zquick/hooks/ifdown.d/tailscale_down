@@ -1,8 +1,8 @@
 #!/bin/bash
 
-log() {
-  echo "zquick: $1" > /dev/kmsg
-}
+# shellcheck disable=SC1091
+. /zquick/libexec/utils.sh
 
-log "Tailscale - Closing SSH sessions"
-pkill -HUP ssh
+qloginit "Tailscale - Closing SSH sessions"
+pkill -HUP sshd
+pkill -HUP login

@@ -14,6 +14,8 @@ add_terminfo() {
 build() {
 	zquick_add_fs
 
+	add_binary lscpu
+
 	zquick_add_secret /etc/zquickinit.conf "zquick init"
 
 	add_terminfo
@@ -31,6 +33,10 @@ build() {
 	add_binary loadkeys
 	add_binary lspci
 	add_binary lshw
+
+	# prefer real readlink over busybox
+	add_binary readlink
+
 	if which yq-go >/dev/null; then
 		add_binary yq-go /bin/yq
 	else
@@ -90,7 +96,7 @@ build() {
 			libpaths+=("$line")
 		done <"$conf"
 	done
-	libs=(security/pam_warn.so security/pam_deny.so security/pam_unix.so security/pam_env.so security/pam_nologin.so)
+	libs=(security/pam_warn.so security/pam_deny.so security/pam_unix.so security/pam_env.so security/pam_nologin.so libnss_wrapper.so)
 	for llib in "${libs[@]}"; do
 		for ldir in "${libpaths[@]}"; do
 			lib=${ldir}/${llib}
@@ -99,7 +105,10 @@ build() {
 	done
 
 	# UDEV stuff
-	use_systemd=$(sed -rn '/^use_systemd=/s/.*=(.*)/\1/p' "${zquickinit_config}/etc/zquickinit.conf")
+	use_systemd="no"
+	if [[ -f "${zquickinit_config}/etc/zquickinit.conf" ]]; then
+		use_systemd=$(sed -rn '/^use_systemd=/s/.*=(.*)/\1/p' "${zquickinit_config}/etc/zquickinit.conf")
+	fi
 	if [[ "${use_systemd}" = "yes" ]]; then
 		echo "use systemd"
 	else

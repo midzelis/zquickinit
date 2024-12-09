@@ -3,6 +3,6 @@
 # shellcheck disable=SC1091
 . /zquick/libexec/utils.sh
 
-qloginit "Tailscale - Closing SSH sessions"
+qinitlog "Tailscale - Closing SSH sessions"
 pkill -HUP sshd
 pkill -HUP login

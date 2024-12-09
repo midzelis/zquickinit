@@ -25,7 +25,10 @@ cat <<EOF
 
 EOF
 
-source /etc/zfsbootmenu.conf
+if [[ -f "/etc/zfsbootmenu.conf" ]]; then
+  source /etc/zfsbootmenu.conf
+fi
+
 echo The controlling terminal is ${control_term}
 echo This terminal is $(tty)
 echo

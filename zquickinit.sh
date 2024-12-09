@@ -78,6 +78,28 @@ tmpdir() {
 }
 
 check() {
+	if ! command -v "$1" &>/dev/null && [[ $1 = mkinitcpio && $NOCONTAINER == 1 ]]; then
+		if [ ! -d ../mkinitcpio ]; then
+			echo "mkinitcpio not found, clone repo to $(pwd)/../mkinitcpio?"
+
+			# to build it, you need to do this:
+
+			# Package: *
+			# Pin: release a=stable
+			# Pin-Priority: 600
+
+			# Package: meson
+			# Pin: release a=testing
+			# Pin-Priority: 700
+
+			# and put deb http://deb.debian.org/debian testing main
+			# into /etc/apt/sources.list
+
+		else
+			export PATH="/usr/local/bin:$PATH"
+			return
+		fi
+	fi
 	if [[ $1 == docker || $1 == podman ]]; then
 		if command -v docker &>/dev/null; then
 			ENGINE=docker
@@ -94,10 +116,10 @@ check() {
 		fi
 	fi
 	if [[ $1 == yq ]]; then
-		if which yq-go >/dev/null; then
+		if which yq-go >/dev/null 2>&1; then
 			YG=yq-go
 			return 0
-		elif which yq >/dev/null; then
+		elif which yq >/dev/null 2>&1; then
 			YG=yq
 			return 0
 		else
@@ -203,7 +225,7 @@ tailscale() {
 make_zquick_initramfs() {
 	check gum gum
 	check mkinitcpio mkinitcpio
-	check blkid
+
 	gum style --bold --border double --align center \
 		--width 50 --margin "1 2" --padding "0 2" "Welcome to ZQuickInit make initramfs"
 
@@ -220,7 +242,7 @@ make_zquick_initramfs() {
 	fi
 	[[ -x /etc/zquickinit-commit-hash ]] && (cd "${INPUT}" && git config --global --add safe.directory "${INPUT}" && /etc/zquickinit-commit-hash && git rev-parse HEAD >/etc/zquickinit-commit-hash && echo "ZQuickInit (https://github.com/midzelis/zquickinit) commit hash: $(git rev-parse --short HEAD) ($(git rev-parse HEAD))")
 
-	if [[ ! -d "${ZBM}" ]]; then
+	if [[ ! -f "${ZBM}/bin/generate-zbm" ]]; then
 		echo "Downloading latest zfsbootmenu"
 		rm -rf "${ZBM}"
 		git clone --quiet --depth 1 https://github.com/zbm-dev/zfsbootmenu.git "${ZBM}"
@@ -403,6 +425,8 @@ make_zquick_initramfs() {
 		COMPRESSION=(zstd)
 		COMPRESSION_OPTIONS=(-9 --long)
 
+		RELEASE=$RELEASE
+
 		zquickinit_root="$zquickinit"
 		zquickinit_config="$zquickinit"
 		if [[ -n "${SECRETS}" ]]; then
@@ -500,12 +524,22 @@ make_zquick_initramfs() {
 	EOF
 
 	hook_dirs+=("${ZBM}/initcpio")
-	hook_dirs+=("/usr/lib/initcpio")
+	if [[ -d "/usr/lib/initcpio" ]]; then
+		hook_dirs+=("/usr/lib/initcpio")
+	fi
+	if [[ -d "/usr/local/lib/x86_64-linux-gnu/initcpio" ]]; then
+		hook_dirs+=("/usr/local/lib/x86_64-linux-gnu/initcpio")
+	fi
 	hookdirs+=("${hook_dirs[@]/#/--hookdir }")
 
 	output_img="${OUTPUT}/zquickinit-$build_time.img"
 	output_uki="${OUTPUT}/zquickinit-$build_time.efi"
-	kernel="$(find "/lib/modules" -maxdepth 1 -type d | grep "/lib/modules/" | sort -V | tail -n 1)"
+	kernel="$(find "/lib/modules" -maxdepth 1 -type d | grep "/lib/modules/" | sort -V | tail -n 1 || true)"
+
+	if [[ -z "${kernel}" ]]; then
+		echo "Could not find kernel in /lib/modules"
+		exit 1
+	fi
 	kernel="${kernel##*/}"
 
 	if [[ -e "/boot/vmlinuz-$kernel" && ! -r "/boot/vmlinuz-$kernel" ]]; then
@@ -552,9 +586,14 @@ make_zquick_initramfs() {
 
 initramfs() {
 	if ((NOCONTAINER == 1)); then
+
 		INPUT=$(pwd)
 		OUTPUT=$(pwd)/output
 		RUNNING_IN_CONTAINER=1
+
+		mkdir -p ./tmp/zbm
+		ZBM="./tmp/zbm"
+
 		make_zquick_initramfs
 		return $?
 	fi
@@ -602,9 +641,19 @@ getefi() {
 inject() {
 
 	inject_secret() {
+
 		local filename='' file='' dir=''
 		filename="${1##*/}"
-		[[ -n "${INSTALLER_MODE:-}" ]] && dir="${1%/*}" || dir="."
+		if [[ -n "${INSTALLER_MODE:-}" ]]; then
+			dtmp="${1%/*}"
+			if [[ "$SECRETS" == /* ]]; then
+				dir=$SECRETS$dtmp
+			else
+				dir=$SRC_ROOT/$SECRETS$dtmp
+			fi
+		else
+			dir="."
+		fi
 		# shellcheck disable=SC2154
 		for path in "$dir" "$1"; do
 			[[ -f "$path/$filename" ]] && file="$path/$filename" && break
@@ -662,6 +711,7 @@ inject() {
 	fi
 
 	local injected=0
+
 	inject_secret "/etc/zquickinit.conf" "zquickinit config" && injected=1
 
 	inject_secret "/etc/tailscale/tailscaled.conf" "tailscale config" 644 && injected=1
@@ -682,10 +732,16 @@ inject() {
 	echo "Done injecting secrets and configuration"
 	echo
 	if ((injected == 1)); then
+
 		check bsdtar "libarchive-tools"
 		check objcopy binutils
 		check truncate coreutils
 		check find findutils
+
+		echo "Secrets were injected, appending '_injected' to name"
+		base_name="${target%.*}"
+		extension="${target##*.}"
+		target="${base_name}_injected.${extension}"
 
 		echo "Copying original EFI ${source} to output location ${target}..."
 		cp "${source}" "${target}"
@@ -702,13 +758,18 @@ inject() {
 		truncate -s "${initrd_size}" "${initrd}"
 
 		echo "Appending secrets to initramfs ${initrd}"
-		# shellcheck disable=SC2094
-		# ${FIND} "${tmp}" -not -path "${initrd}" -not -path "${source}" -print | \
-		# 	pax -x sv4cpio -wd -s#"${tmp}"## | zstd >> "${initrd}"
 
-		# shellcheck disable=SC2094
-		${FIND} "${tmp}" -not -path "${initrd}" -not -path "${source}" -print |
-			bsdtar -P --format=newc -c -f - -T - -n "-s#${tmp}##" | zstd >>"${initrd}"
+		if command -v bsdtar &>/dev/null; then
+			# shellcheck disable=SC2094
+			${FIND} "${tmp}" -not -path "${initrd}" -not -path "${source}" -print |
+				bsdtar -P --format=newc -c -f - -T - -n "-s#${tmp}##" | zstd >>"${initrd}"
+		elif command -v pax &>/dev/null; then
+			# shellcheck disable=SC2094
+			${FIND} "${tmp}" -not -path "${initrd}" -not -path "${source}" -print |
+				pax -x sv4cpio -wd "-s#${tmp}##" | zstd >>"${initrd}"
+		else
+			echo "You must have pax or bsdtar installed"
+		fi
 
 		echo "Replacing initramfs with new initramfs ${initrd} in ${target}..."
 		$OBJCOPY --remove-section .initrd "${target}"
@@ -735,7 +796,8 @@ inject() {
 			echo "${conf} already exists." && exit 1
 		fi
 		mkdir -p "/efi/loader/entries"
-		echo "title    zquickinit ($version)" >"$conf"
+		cur_date=$(date +"%m/%d/%y %H:%M")
+		echo "title    zquickinit ($version) [ $cur_date ]" >"$conf"
 		echo "options  ${KERNEL_CMDLINE}" >>"$conf"
 		echo "linux    /EFI/${btarget}" >>"$conf"
 
@@ -797,6 +859,15 @@ iso() {
 	# mkdir -p "${isoroot}/EFI/BOOT"
 	# cp "$source" "${isoroot}/EFI/BOOT/BOOTX64.EFI"
 	xorriso -as mkisofs -r -V 'ZQINIT' -append_partition 2 0xef "${part_img}" -e --interval:appended_partition_2:all:: -no-emul-boot -partition_offset 16 --no-pad -o "${target}" "${isoroot}"
+}
+
+zbootstrap() {
+	echo
+	echo "zbootstrap"
+	echo
+
+	export INSTALLER_DIR=recipes/zquick_bootstrap/fs/zquick/libexec/installer
+	"${INSTALLER_DIR}"/installer.sh --secrets "$SECRETS" "$@"
 }
 
 playground() {
@@ -907,7 +978,7 @@ playground() {
 		else
 			args+=(-cpu qemu64 -machine q35)
 			echo "/dev/kvm not found, or user does not have access - performance will be significantly worse"
-			echo "If /dev/kvm does not exist, this may help 'sudo mknod /dev/kvm c 10 232 && sudo chown root:kvm /dev/kvm'"
+			echo "If /dev/kvm does not exist, this may help 'sudo mknod /dev/kvm c 10 232 && sudo chown root:kvm /dev/kvm && sudo chmod 664 /dev/kvm'"
 			echo "If the kvm group exists, this may help 'sudo usermod --append --groups kvm $(whoami)'"
 			sleep 1
 		fi
@@ -1097,6 +1168,7 @@ else
 	echo "    zquickinit.sh inject [target_efi] [source_efi]"
 	echo "    zquickinit.sh iso [target_iso] [source_efi] "
 	echo "    zquickinit.sh playground [--ssh-only] [--no-kernel] [--drive2]"
+	echo "    zquickinit.sh zbootstrap"
 	echo
 	echo "  Advanced Usage"
 	echo "    zquickinit.sh builder"

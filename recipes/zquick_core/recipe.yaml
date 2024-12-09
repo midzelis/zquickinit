@@ -8,7 +8,7 @@ xbps-packages:
   - busybox-huge
   - util-linux
   - pciutils
-  - lshw
+  - lshw - nss_wrapper
 debian-packages:
   - kbd
 help: "Required common dependencies to all recipes"

@@ -2,16 +2,21 @@
 
 build() {
 
+	zquick_add_fs
+
+	if [[ $RELEASE == 1 ]]; then
+		echo "Zquickinit" >"$BUILDROOT/etc/hostname"
+		return
+	fi
+
 	for hostname in "$zquickinit_config/etc/hostname" "/etc/hostname"; do
 		[[ -f "$hostname" ]] && break
 	done
 
-	warning "using $hostname"
 	if [ ! -r "$hostname" ]; then
 		warning "Hostname not found"
 	else
 		add_file "$hostname" /etc/hostname
 	fi
 
-	zquick_add_fs
 }

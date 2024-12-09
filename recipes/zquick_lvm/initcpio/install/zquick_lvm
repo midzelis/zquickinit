@@ -13,8 +13,8 @@ build() {
 
     # binaries from lvm2
     add_binary "lvm"
-	if which lvmetad > /dev/null; then
-		add_binary "lvmetad"
+    if which lvmetad >/dev/null 2>&1; then
+        add_binary "lvmetad"
     fi
 
     # binaries from device-mapper

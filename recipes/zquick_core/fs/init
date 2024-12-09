@@ -49,10 +49,15 @@ start_getty() {
     fi
 }
 
+export TERMINFO_DIRS=/usr/share/terminfo
+export TERM=xterm-256color
+
 . /zquick/libexec/utils.sh
 
-# shellcheck disable=SC1091
-. /etc/zquickinit.conf
+if [[ -f "/etc/zfsbootmenu.conf" ]]; then
+    # shellcheck disable=SC1091
+    source /etc/zfsbootmenu.conf
+fi
 
 trap '' EXIT INT TERM
 #tput clear

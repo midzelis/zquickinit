@@ -1,5 +1,25 @@
 #!/bin/bash
 
+wrap_user() {
+	U=$(id -u)
+	G=$(id -g)
+
+	HOME_DIR=/tmp/user
+	PASSWD=/var/tmp/passwd
+	GROUP=/var/tmp/group
+
+	if [ ! -d "$HOME_DIR" ]; then
+		mkdir "$HOME_DIR"
+	fi
+	if [ ! -f "$PASSWD" ]; then
+		echo "user::$U:$G::$HOME_DIR:" >"$PASSWD"
+	fi
+	if [ ! -f "$GROUP" ]; then
+		echo "user::$G:" >"$GROUP"
+	fi
+
+	LD_PRELOAD=libnss_wrapper.so NSS_WRAPPER_PASSWD="$PASSWD" NSS_WRAPPER_GROUP="$GROUP" "$@"
+}
 build() {
 	zquick_add_fs
 
@@ -19,14 +39,14 @@ build() {
 	zquick_add_secret /etc/ssh/sshd_config "sshd configuration" 644
 
 	if [[ ! -e "${BUILDROOT}/etc/ssh/ssh_host_rsa_key" && ! -e "${BUILDROOT}/etc/ssh/ssh_host_ecdsa_key" && ! -e "${BUILDROOT}/etc/ssh/ssh_host_ed25519_key" ]]; then
-		msg2 "No host keys specified, autogenerating new keys for this build. Keys will be not be saved to zquickinit configuration area."
-		ssh-keygen -A -f "${BUILDROOT}"
+		msg2 "NOTICE: No host keys specified, autogenerating new keys for this build. Keys will be not be saved to zquickinit configuration area."
+		wrap_user ssh-keygen -A -f "${BUILDROOT}"
 	fi
 
 	if [[ ! -e "${BUILDROOT}/etc/ssh/sshd_config" ]]; then
 		msg2 "sshd_config not found, sshd will likely not run until this file is present. (Can be injected into image later)"
 	elif [[ ! -e "${BUILDROOT}/root/.ssh/authorized_keys" ]]; then
-		msg2 "/root/.ssh/authorized_keys not found."
+		msg2 "NOTICE: /root/.ssh/authorized_keys not found."
 	fi
 
 }

@@ -1,29 +1,32 @@
-name: Create Release
+name: Build and Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'The next release tag to use'
-        required: false
-        type: string
+  pull_request:
   push:
     branches:
       - 'main'
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The release tag to create (leave empty to bump the patch version)'
+        required: false
+        type: string
 
-# Ensures that only one deploy task per branch/environment will run at a time.
+# Ensures that only one run per branch/tag will run at a time.
 concurrency:
   group: environment-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  # Use docker.io for Docker Hub if empty 
+  # Use docker.io for Docker Hub if empty
   REGISTRY: ghcr.io
   # github.repository as <account>/<repo>
   IMAGE_NAME: ${{ github.repository }}
-  
+  # Releases are only published for pushed v* tags or manual runs
+  RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+
 jobs:
   docker:
     runs-on: ubuntu-latest
@@ -37,7 +40,7 @@ jobs:
           driver-opts: network=host
           install: true
       - name: Log into registry ${{ env.REGISTRY }}
-        if: github.event_name != 'pull_request'
+        if: env.RELEASE == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -45,39 +48,43 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Expose GitHub Runtime
         uses: crazy-max/ghaction-github-runtime@v3
-      # - name: Env
-      #   run: |
-      #     # ACTIONS_RUNTIME_TOKEN, ACTIONS_RUNTIME_URL should be exposed
-      #     env|sort
       - name: Check out the repository to the runner
-        uses: actions/checkout@v4  
-      # - name: Set up caching
-      # In this step, this action saves a list of existing images,
-      # the cache is created without them in the post run.
-      # It also restores the cache if it exists.
-        # uses: jpribyl/action-docker-layer-caching@v0.1.1
-        # # Ignore the failure of a step and avoid terminating the job.
-        # continue-on-error: true
+        uses: actions/checkout@v4
       - name: Bump version and push tag
         id: tag_version
+        if: github.event_name == 'workflow_dispatch'
         uses: mathieudutour/github-tag-action@v6.1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           custom_tag: ${{ inputs.tag }}
+      - name: Determine release tag
+        if: env.RELEASE == 'true'
+        run: echo "TAG=${{ steps.tag_version.outputs.new_tag || github.ref_name }}" >> "$GITHUB_ENV"
       - name: Build the builder
         run: ./zquickinit.sh builder --githubaction --load
       - name: Push OCI package to registry
-        run: ./zquickinit.sh builder --githubaction --push --tag ghcr.io/midzelis/zquickinit:latest --tag ghcr.io/midzelis/zquickinit:${{ steps.tag_version.outputs.new_tag }}
+        if: env.RELEASE == 'true'
+        run: ./zquickinit.sh builder --githubaction --push --tag ghcr.io/midzelis/zquickinit:latest --tag ghcr.io/midzelis/zquickinit:${{ env.TAG }}
       - name: Build initramfs
         run: ./zquickinit.sh initramfs --no-ask --release
       - name: Build ISO
         run: sudo apt-get install -y mtools xorriso coreutils findutils && ./zquickinit.sh iso
+      - name: Upload build artifacts
+        if: env.RELEASE != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: zquickinit
+          path: |
+            output/zquickinit.efi
+            zquickinit.iso
       - name: Create a GitHub release
+        if: env.RELEASE == 'true'
         uses: ncipollo/release-action@v1.12.0
         with:
-          tag: ${{ steps.tag_version.outputs.new_tag }}
-          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          tag: ${{ env.TAG }}
+          name: Release ${{ env.TAG }}
           body: ${{ steps.tag_version.outputs.changelog }}
+          generateReleaseNotes: ${{ steps.tag_version.outputs.changelog == '' }}
           removeArtifacts: true
           artifacts: "output/zquickinit.efi,zquickinit.iso"
           allowUpdates: true

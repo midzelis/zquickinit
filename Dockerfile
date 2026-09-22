@@ -10,7 +10,6 @@
 
 # Use the official Void Linux container
 FROM ghcr.io/void-linux/void-glibc-full 
-LABEL org.opencontainers.image.source=https://github.com/midzelis/zquickinit
 
 ARG XBPS_REPOS="https://repo-fastly.voidlinux.org/current https://repo-fastly.voidlinux.org/current/nonfree"
 
